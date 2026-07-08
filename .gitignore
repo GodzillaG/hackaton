@@ -1,0 +1,9 @@
+.next/
+node_modules/
+reports/
+archive/
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.local
