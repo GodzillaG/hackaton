@@ -191,7 +191,7 @@ export default function Home() {
   const [authUser, setAuthUser] = useState(null);
   const [authToken, setAuthToken] = useState("");
   const [authMode, setAuthMode] = useState("login");
-  const [authForm, setAuthForm] = useState({ username: "admin", password: "12345678" });
+  const [authForm, setAuthForm] = useState({ username: "", password: "" });
   const [authError, setAuthError] = useState("");
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [reports, setReports] = useState([]);
@@ -1079,7 +1079,7 @@ function AuthScreen({
           autoComplete="username"
           value={authForm.username}
           onChange={(event) => onChange((current) => ({ ...current, username: event.target.value }))}
-          placeholder="admin"
+          placeholder="Ваш логин"
         />
 
         <label className="fieldLabel" htmlFor="authPassword">
@@ -1092,7 +1092,7 @@ function AuthScreen({
           type="password"
           value={authForm.password}
           onChange={(event) => onChange((current) => ({ ...current, password: event.target.value }))}
-          placeholder="12345678"
+          placeholder="Ваш пароль"
         />
 
         {authError ? <div className="errorBox">{authError}</div> : null}
