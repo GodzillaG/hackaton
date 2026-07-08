@@ -14,6 +14,8 @@ The working architecture is:
 
 The phone must interact only with the Next.js site on port `3000`. Browser uploads go to the same-origin Next.js route `/api/analyze`; Next.js then proxies the request to the local Python server at `127.0.0.1:5000`.
 
+The main screening flow is a five-view capture protocol: front, back, left side, right side, and Adams forward bend test. Do not regress it back to single-photo-only capture.
+
 ## User Preferences
 
 - Reply to the user in Russian unless they explicitly ask otherwise.

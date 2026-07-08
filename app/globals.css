@@ -206,6 +206,85 @@ h4 {
   margin-bottom: 14px;
 }
 
+.protocolProgress {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+  color: #344054;
+  font-size: 0.84rem;
+  font-weight: 850;
+}
+
+.progressTrack {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #e5eaf1;
+}
+
+.progressTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width 180ms ease;
+}
+
+.viewStepper {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.viewStep {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 5px;
+  color: #344054;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.viewStep strong {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: 0 auto 5px;
+  border-radius: 50%;
+  color: #ffffff;
+  background: var(--gray);
+  font-size: 0.78rem;
+}
+
+.viewStep span {
+  overflow: hidden;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewStep.active {
+  border-color: var(--blue);
+  color: #1e40af;
+  background: #eff6ff;
+}
+
+.viewStep.active strong {
+  background: var(--blue);
+}
+
+.viewStep.done strong {
+  background: var(--green);
+}
+
 .sampleHeader {
   display: flex;
   align-items: center;
@@ -330,6 +409,36 @@ h4 {
   background: #ffffff;
 }
 
+.scanFrame-left .scanBody,
+.scanFrame-right .scanBody {
+  width: 36px;
+  border-radius: 22px 18px 8px 8px;
+}
+
+.scanFrame-left .scanLine,
+.scanFrame-right .scanLine {
+  width: 58px;
+}
+
+.scanFrame-adams .scanHead {
+  top: 46px;
+}
+
+.scanFrame-adams .scanBody {
+  top: 82px;
+  width: 86px;
+  height: 52px;
+  border-radius: 30px 30px 12px 12px;
+}
+
+.scanFrame-adams .scanLine.shoulder {
+  top: 96px;
+}
+
+.scanFrame-adams .scanLine.hip {
+  top: 126px;
+}
+
 .scanHead,
 .scanBody,
 .scanLine {
@@ -380,6 +489,33 @@ h4 {
   background: #fff1f1;
   font-size: 0.92rem;
   font-weight: 700;
+}
+
+.activeViewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 0 6px;
+}
+
+.activeViewHeader span {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.viewHint {
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
 .actionRow {
@@ -533,7 +669,7 @@ h4 {
 
 .summaryGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin: 14px 0;
 }
@@ -685,6 +821,59 @@ h4 {
   white-space: nowrap;
 }
 
+.viewResultGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.viewResultCard {
+  --risk: var(--gray);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.viewResultTop,
+.viewResultMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.viewResultTop h4 {
+  margin-bottom: 3px;
+}
+
+.viewResultTop span,
+.viewResultMeta {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.viewResultTop strong {
+  color: var(--risk);
+  font-size: 1.1rem;
+}
+
+.viewResultCard img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: contain;
+  background: #0f172a;
+}
+
+.viewResultMeta {
+  border-top: 1px solid var(--line);
+}
+
 @media (max-width: 980px) {
   .workspace,
   .contentGrid {
@@ -740,11 +929,19 @@ h4 {
   }
 
   .summaryGrid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .sampleGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .viewStepper {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .viewResultGrid {
+    grid-template-columns: 1fr;
   }
 
   .riskGauge {
