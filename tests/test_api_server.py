@@ -97,7 +97,9 @@ class ApiServerTests(unittest.TestCase):
         headers = {"Authorization": f"Bearer {payload['token']}"}
         me_response = self.client.get("/api/auth/me", headers=headers)
         self.assertEqual(me_response.status_code, 200)
-        self.assertEqual(me_response.get_json()["user"]["username"], "admin")
+        me_payload = me_response.get_json()
+        self.assertEqual(me_payload["user"]["username"], "admin")
+        self.assertFalse(me_payload["billing"]["advanced_enabled"])
 
         logout_response = self.client.post("/api/auth/logout", headers=headers)
         self.assertEqual(logout_response.status_code, 200)
@@ -113,6 +115,29 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(payload["user"]["username"], "school01")
         self.assertTrue(payload["token"])
+        self.assertFalse(payload["billing"]["advanced_enabled"])
+
+    def test_billing_checkout_enables_advanced(self):
+        plans_response = self.client.get("/api/billing/plans")
+        plans_payload = plans_response.get_json()
+        self.assertEqual(plans_response.status_code, 200)
+        self.assertTrue(any(plan["id"] == "individual_one_time" for plan in plans_payload["plans"]))
+
+        status_response = self.client.get("/api/billing/status", headers=self.auth_headers)
+        self.assertEqual(status_response.status_code, 200)
+        self.assertFalse(status_response.get_json()["advanced_enabled"])
+
+        checkout_response = self.client.post(
+            "/api/billing/checkout",
+            json={"plan_id": "corporate_monthly", "organization_name": "School 42"},
+            headers=self.auth_headers,
+        )
+        checkout_payload = checkout_response.get_json()
+
+        self.assertEqual(checkout_response.status_code, 200)
+        self.assertTrue(checkout_payload["advanced_enabled"])
+        self.assertEqual(checkout_payload["subscription"]["audience"], "corporate")
+        self.assertEqual(checkout_payload["subscription"]["organization_name"], "School 42")
 
     def test_analyze_requires_login(self):
         response = self.client.post("/api/analyze", data={})
@@ -156,7 +181,46 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(restored_response.status_code, 200)
         self.assertTrue(restored_response.get_json()["overlay_image"].startswith("data:image/jpeg;base64,"))
 
+    def test_advanced_protocol_requires_paid_plan(self):
+        response = self.client.post(
+            "/api/analyze",
+            data={
+                "student_id": "7B-014",
+                "image_front": (io.BytesIO(jpeg_bytes()), "front.jpg"),
+                "image_back": (io.BytesIO(jpeg_bytes()), "back.jpg"),
+                "image_left": (io.BytesIO(jpeg_bytes()), "left.jpg"),
+                "image_right": (io.BytesIO(jpeg_bytes()), "right.jpg"),
+                "image_adams": (io.BytesIO(jpeg_bytes()), "adams.jpg"),
+            },
+            content_type="multipart/form-data",
+            headers=self.auth_headers,
+        )
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 402)
+        self.assertEqual(payload["code"], "advanced_required")
+        self.assertIn("Advanced", payload["error"])
+
+    def test_advanced_protocol_requires_all_five_views(self):
+        self.storage.activate_plan(self.admin["id"], "individual_one_time")
+
+        response = self.client.post(
+            "/api/analyze",
+            data={
+                "student_id": "7B-014",
+                "image_front": (io.BytesIO(jpeg_bytes()), "front.jpg"),
+            },
+            content_type="multipart/form-data",
+            headers=self.auth_headers,
+        )
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("все 5 ракурсов", payload["error"])
+
     def test_analyze_accepts_five_view_protocol(self):
+        self.storage.activate_plan(self.admin["id"], "individual_monthly")
+
         response = self.client.post(
             "/api/analyze",
             data={

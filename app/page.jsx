@@ -6,7 +6,17 @@ const ANALYZE_ENDPOINT = "/api/analyze";
 const HEALTH_ENDPOINT = "/api/health";
 const AUTH_TOKEN_KEY = "scolioscan_session_token";
 const REPORTS_ENDPOINT = "/api/reports";
+const BILLING_ENDPOINT = "/api/billing";
 const MAX_UPLOAD_SIDE = 1600;
+const DEFAULT_BILLING_STATUS = { advanced_enabled: false, subscription: null };
+
+const BASIC_CAPTURE_STEP = {
+  key: "single",
+  fieldName: "image",
+  label: "Basic",
+  title: "Базовое фото",
+  hint: "Один снимок в полный рост спереди, камера ровно на уровне середины корпуса."
+};
 
 const VIEW_STEPS = [
   {
@@ -179,7 +189,14 @@ export default function Home() {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [reports, setReports] = useState([]);
   const [isReportsLoading, setIsReportsLoading] = useState(false);
+  const [plans, setPlans] = useState([]);
+  const [billing, setBilling] = useState(DEFAULT_BILLING_STATUS);
+  const [isBillingLoading, setIsBillingLoading] = useState(false);
+  const [organizationName, setOrganizationName] = useState("");
   const [studentId, setStudentId] = useState("");
+  const [analysisMode, setAnalysisMode] = useState("basic");
+  const [basicCapture, setBasicCapture] = useState(null);
+  const [basicPreviewUrl, setBasicPreviewUrl] = useState("");
   const [captures, setCaptures] = useState(createEmptyCaptureMap);
   const [previewUrls, setPreviewUrls] = useState({});
   const [activeView, setActiveView] = useState(VIEW_STEPS[0].key);
@@ -187,11 +204,13 @@ export default function Home() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const previewUrlsRef = useRef({});
+  const basicPreviewUrlRef = useRef("");
 
   const activeStep = VIEW_STEPS.find((step) => step.key === activeView) || VIEW_STEPS[0];
   const completedCount = VIEW_STEPS.filter((step) => captures[step.key]).length;
   const isProtocolReady = completedCount === VIEW_STEPS.length;
   const activePreviewUrl = previewUrls[activeStep.key] || "";
+  const hasAdvancedAccess = Boolean(billing?.advanced_enabled);
 
   useEffect(() => {
     const savedToken = window.localStorage.getItem(AUTH_TOKEN_KEY);
@@ -212,14 +231,16 @@ export default function Home() {
         if (!isActive) return;
         setAuthToken(savedToken);
         setAuthUser(payload.user);
+        setBilling(payload.billing || DEFAULT_BILLING_STATUS);
         setAuthStatus("authenticated");
-        await loadReports(savedToken);
+        await Promise.all([loadReports(savedToken), loadBilling(savedToken)]);
       } catch {
         window.localStorage.removeItem(AUTH_TOKEN_KEY);
         if (isActive) {
           setAuthStatus("guest");
           setAuthToken("");
           setAuthUser(null);
+          setBilling(DEFAULT_BILLING_STATUS);
         }
       }
     }
@@ -262,8 +283,22 @@ export default function Home() {
   useEffect(() => {
     return () => {
       Object.values(previewUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+      if (basicPreviewUrlRef.current) URL.revokeObjectURL(basicPreviewUrlRef.current);
     };
   }, []);
+
+  function setBasicFile(nextFile) {
+    setError("");
+    setResult(null);
+    setBasicCapture(nextFile || null);
+
+    setBasicPreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      const nextUrl = nextFile ? URL.createObjectURL(nextFile) : "";
+      basicPreviewUrlRef.current = nextUrl;
+      return nextUrl;
+    });
+  }
 
   function setViewFile(viewKey, nextFile) {
     setError("");
@@ -294,7 +329,33 @@ export default function Home() {
     setAuthToken("");
     setAuthUser(null);
     setReports([]);
+    setBilling(DEFAULT_BILLING_STATUS);
     setResult(null);
+  }
+
+  async function loadBilling(token = authToken) {
+    if (!token) return;
+    setIsBillingLoading(true);
+    try {
+      const [plansResponse, statusResponse] = await Promise.all([
+        fetch(`${BILLING_ENDPOINT}/plans`, { cache: "no-store" }),
+        fetch(`${BILLING_ENDPOINT}/status`, {
+          headers: authHeaders(token),
+          cache: "no-store"
+        })
+      ]);
+
+      const plansPayload = await plansResponse.json().catch(() => ({ plans: [] }));
+      const statusPayload = await statusResponse.json().catch(() => DEFAULT_BILLING_STATUS);
+      if (statusResponse.status === 401) {
+        clearSession();
+        return;
+      }
+      if (plansResponse.ok) setPlans(plansPayload.plans || []);
+      if (statusResponse.ok) setBilling(statusPayload || DEFAULT_BILLING_STATUS);
+    } finally {
+      setIsBillingLoading(false);
+    }
   }
 
   async function loadReports(token = authToken) {
@@ -332,8 +393,9 @@ export default function Home() {
       window.localStorage.setItem(AUTH_TOKEN_KEY, payload.token);
       setAuthToken(payload.token);
       setAuthUser(payload.user);
+      setBilling(payload.billing || DEFAULT_BILLING_STATUS);
       setAuthStatus("authenticated");
-      await loadReports(payload.token);
+      await Promise.all([loadReports(payload.token), loadBilling(payload.token)]);
     } catch (loginError) {
       setAuthError(loginError.message || "Не удалось войти.");
     } finally {
@@ -350,6 +412,37 @@ export default function Home() {
     }
     clearSession();
     resetScan();
+  }
+
+  async function activatePlan(plan) {
+    if (!plan || !authToken) return;
+    setIsBillingLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${BILLING_ENDPOINT}/checkout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders()
+        },
+        body: JSON.stringify({
+          plan_id: plan.id,
+          organization_name: plan.audience === "corporate" ? organizationName : ""
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        clearSession();
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error || "Не удалось оформить тариф.");
+      setBilling(payload);
+    } catch (billingError) {
+      setError(billingError.message || "Не удалось оформить тариф.");
+    } finally {
+      setIsBillingLoading(false);
+    }
   }
 
   async function openReport(reportId) {
@@ -420,6 +513,23 @@ export default function Home() {
     }
   }
 
+  async function onBasicFileChange(event) {
+    const nextFile = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!nextFile) {
+      return;
+    }
+
+    try {
+      setError("");
+      const preparedFile = await prepareImageFile(nextFile);
+      setBasicFile(preparedFile);
+    } catch (fileError) {
+      setError(fileError.message || "Не удалось подготовить изображение.");
+    }
+  }
+
   async function useSampleImage(sample) {
     setError("");
     setResult(null);
@@ -431,18 +541,45 @@ export default function Home() {
       }
 
       const blob = await response.blob();
-      const nextCaptures = {};
 
-      for (const step of VIEW_STEPS) {
-        const sampleFile = makeFile(blob, `${step.key}_${sample.fileName}`);
-        nextCaptures[step.key] = await prepareImageFile(sampleFile);
+      if (analysisMode === "advanced") {
+        const nextCaptures = {};
+
+        for (const step of VIEW_STEPS) {
+          const sampleFile = makeFile(blob, `${step.key}_${sample.fileName}`);
+          nextCaptures[step.key] = await prepareImageFile(sampleFile);
+        }
+
+        setProtocolFiles(nextCaptures, sample.studentId);
+        if (hasAdvancedAccess) {
+          await analyzeProtocol(nextCaptures, sample.studentId);
+        } else {
+          setError("Для запуска Advanced-анализа оформите тариф.");
+        }
+        return;
       }
 
-      setProtocolFiles(nextCaptures, sample.studentId);
-      await analyzeProtocol(nextCaptures, sample.studentId);
+      const sampleFile = makeFile(blob, sample.fileName);
+      const preparedFile = await prepareImageFile(sampleFile);
+      setBasicFile(preparedFile);
+      setStudentId(sample.studentId);
+      await analyzeBasic(preparedFile, sample.studentId);
     } catch (sampleError) {
       setError(sampleError.message || "Пример недоступен.");
     }
+  }
+
+  async function analyzeBasic(nextCapture = basicCapture, nextStudentId = studentId) {
+    if (!nextCapture) {
+      setError("Добавьте фото для базового анализа.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append(BASIC_CAPTURE_STEP.fieldName, nextCapture, nextCapture.name || "basic.jpg");
+    formData.append("student_id", String(nextStudentId || "").trim() || "unknown");
+
+    await submitAnalyzeForm(formData, "Не удалось отправить фото.");
   }
 
   async function analyzeProtocol(nextCaptures = captures, nextStudentId = studentId) {
@@ -453,6 +590,11 @@ export default function Home() {
       return;
     }
 
+    if (!hasAdvancedAccess) {
+      setError("Advanced-анализ на 5 фото доступен после оформления тарифа.");
+      return;
+    }
+
     const formData = new FormData();
     for (const step of VIEW_STEPS) {
       const file = nextCaptures[step.key];
@@ -460,6 +602,10 @@ export default function Home() {
     }
     formData.append("student_id", String(nextStudentId || "").trim() || "unknown");
 
+    await submitAnalyzeForm(formData, "Не удалось отправить протокол.");
+  }
+
+  async function submitAnalyzeForm(formData, fallbackError) {
     setIsLoading(true);
     setError("");
     setResult(null);
@@ -481,6 +627,10 @@ export default function Home() {
       if (!response.ok) {
         if (response.status === 503) setApiStatus("offline");
         if (response.status === 401) clearSession();
+        if (response.status === 402 && payload.code === "advanced_required") {
+          setAnalysisMode("advanced");
+          await loadBilling(authToken);
+        }
         throw new Error(payload.error || "Сервер анализа вернул ошибку.");
       }
 
@@ -488,25 +638,39 @@ export default function Home() {
       setResult(payload);
       await loadReports(authToken);
     } catch (requestError) {
-      setError(requestError.message || "Не удалось отправить протокол.");
+      setError(requestError.message || fallbackError);
     } finally {
       setIsLoading(false);
     }
   }
 
-  async function analyzePhoto(event) {
+  async function submitAnalysis(event) {
     event.preventDefault();
-    await analyzeProtocol();
+    if (analysisMode === "advanced") {
+      await analyzeProtocol();
+    } else {
+      await analyzeBasic();
+    }
   }
 
   function resetScan() {
     Object.values(previewUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    if (basicPreviewUrlRef.current) URL.revokeObjectURL(basicPreviewUrlRef.current);
     previewUrlsRef.current = {};
+    basicPreviewUrlRef.current = "";
+    setBasicCapture(null);
+    setBasicPreviewUrl("");
     setCaptures(createEmptyCaptureMap());
     setPreviewUrls({});
     setActiveView(VIEW_STEPS[0].key);
     setResult(null);
     setError("");
+  }
+
+  function switchAnalysisMode(nextMode) {
+    setAnalysisMode(nextMode);
+    setError("");
+    setResult(null);
   }
 
   function downloadJson() {
@@ -567,6 +731,9 @@ export default function Home() {
             <span />
             {apiStatus === "online" ? "Готов" : apiStatus === "offline" ? "Нет связи" : "Проверка"}
           </div>
+          <div className={`planPill ${hasAdvancedAccess ? "active" : ""}`}>
+            {hasAdvancedAccess ? billing.subscription?.name || "Advanced" : "Basic"}
+          </div>
           <div className="userPill">{authUser?.username}</div>
           <button className="ghostButton" type="button" onClick={logoutUser}>
             Выйти
@@ -575,14 +742,33 @@ export default function Home() {
       </header>
 
       <section className="workspace">
-        <form className="panel capturePanel" onSubmit={analyzePhoto}>
+        <form className="panel capturePanel" onSubmit={submitAnalysis}>
           <div className="panelHeader">
             <div>
               <p className="eyebrow">Новый скрининг</p>
-              <h2>Протокол 5 ракурсов</h2>
+              <h2>{analysisMode === "advanced" ? "Advanced анализ" : "Basic анализ"}</h2>
             </div>
             <button className="ghostButton" type="button" onClick={resetScan}>
               Сброс
+            </button>
+          </div>
+
+          <div className="analysisModeSwitch" aria-label="Режим анализа">
+            <button
+              className={analysisMode === "basic" ? "active" : ""}
+              type="button"
+              onClick={() => switchAnalysisMode("basic")}
+            >
+              <strong>Basic</strong>
+              <span>1 фото</span>
+            </button>
+            <button
+              className={analysisMode === "advanced" ? "active" : ""}
+              type="button"
+              onClick={() => switchAnalysisMode("advanced")}
+            >
+              <strong>Advanced</strong>
+              <span>5 фото</span>
             </button>
           </div>
 
@@ -596,27 +782,6 @@ export default function Home() {
             onChange={(event) => setStudentId(event.target.value)}
             placeholder="Например: 7B-014"
           />
-
-          <div className="protocolProgress">
-            <span>{completedCount}/5</span>
-            <div className="progressTrack">
-              <span style={{ width: `${(completedCount / VIEW_STEPS.length) * 100}%` }} />
-            </div>
-          </div>
-
-          <div className="viewStepper" aria-label="Ракурсы скрининга">
-            {VIEW_STEPS.map((step, index) => (
-              <button
-                className={`viewStep ${activeStep.key === step.key ? "active" : ""} ${captures[step.key] ? "done" : ""}`}
-                key={step.key}
-                type="button"
-                onClick={() => setActiveView(step.key)}
-              >
-                <strong>{index + 1}</strong>
-                <span>{step.label}</span>
-              </button>
-            ))}
-          </div>
 
           <div className="sampleBlock">
             <div className="sampleHeader">
@@ -643,57 +808,149 @@ export default function Home() {
 
           <ReportHistory reports={reports} isLoading={isReportsLoading} onOpen={openReport} />
 
-          <div className="activeViewHeader">
-            <div>
-              <p className="eyebrow">{activeStep.label}</p>
-              <h3>{activeStep.title}</h3>
-            </div>
-            <span>{captures[activeStep.key] ? "Готово" : "Нужно фото"}</span>
-          </div>
-          <p className="viewHint">{activeStep.hint}</p>
+          {analysisMode === "advanced" ? (
+            <>
+              <PricingPanel
+                billing={billing}
+                isLoading={isBillingLoading}
+                onActivate={activatePlan}
+                onOrganizationChange={setOrganizationName}
+                organizationName={organizationName}
+                plans={plans}
+              />
 
-          <label className={`photoDrop ${activePreviewUrl ? "hasPreview" : ""}`} htmlFor="galleryInput">
-            {activePreviewUrl ? (
-              <img src={activePreviewUrl} alt={`Фото: ${activeStep.title}`} />
-            ) : (
-              <div className="emptyPreview">
-                <div className={`scanFrame scanFrame-${activeStep.key}`}>
-                  <span className="scanHead" />
-                  <span className="scanBody" />
-                  <span className="scanLine shoulder" />
-                  <span className="scanLine hip" />
+              <div className="protocolProgress">
+                <span>{completedCount}/5</span>
+                <div className="progressTrack">
+                  <span style={{ width: `${(completedCount / VIEW_STEPS.length) * 100}%` }} />
                 </div>
-                <strong>{activeStep.title}</strong>
-                <small>JPG / PNG</small>
               </div>
-            )}
-          </label>
-          <input
-            id="cameraInput"
-            className="fileInput"
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={onFileChange}
-          />
-          <input
-            id="galleryInput"
-            className="fileInput"
-            type="file"
-            accept="image/*"
-            onChange={onFileChange}
-          />
+
+              <div className="viewStepper" aria-label="Ракурсы скрининга">
+                {VIEW_STEPS.map((step, index) => (
+                  <button
+                    className={`viewStep ${activeStep.key === step.key ? "active" : ""} ${captures[step.key] ? "done" : ""}`}
+                    key={step.key}
+                    type="button"
+                    onClick={() => setActiveView(step.key)}
+                  >
+                    <strong>{index + 1}</strong>
+                    <span>{step.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="activeViewHeader">
+                <div>
+                  <p className="eyebrow">{activeStep.label}</p>
+                  <h3>{activeStep.title}</h3>
+                </div>
+                <span>{captures[activeStep.key] ? "Готово" : "Нужно фото"}</span>
+              </div>
+              <p className="viewHint">{activeStep.hint}</p>
+
+              <label className={`photoDrop ${activePreviewUrl ? "hasPreview" : ""}`} htmlFor="galleryInput">
+                {activePreviewUrl ? (
+                  <img src={activePreviewUrl} alt={`Фото: ${activeStep.title}`} />
+                ) : (
+                  <div className="emptyPreview">
+                    <div className={`scanFrame scanFrame-${activeStep.key}`}>
+                      <span className="scanHead" />
+                      <span className="scanBody" />
+                      <span className="scanLine shoulder" />
+                      <span className="scanLine hip" />
+                    </div>
+                    <strong>{activeStep.title}</strong>
+                    <small>JPG / PNG</small>
+                  </div>
+                )}
+              </label>
+              <input
+                id="cameraInput"
+                className="fileInput"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={onFileChange}
+              />
+              <input
+                id="galleryInput"
+                className="fileInput"
+                type="file"
+                accept="image/*"
+                onChange={onFileChange}
+              />
+            </>
+          ) : (
+            <>
+              <div className="basicIntro">
+                <div>
+                  <strong>Базовый режим</strong>
+                  <span>Быстрый анализ по одному фронтальному фото.</span>
+                </div>
+                <em>$0</em>
+              </div>
+
+              <div className="activeViewHeader">
+                <div>
+                  <p className="eyebrow">{BASIC_CAPTURE_STEP.label}</p>
+                  <h3>{BASIC_CAPTURE_STEP.title}</h3>
+                </div>
+                <span>{basicCapture ? "Готово" : "Нужно фото"}</span>
+              </div>
+              <p className="viewHint">{BASIC_CAPTURE_STEP.hint}</p>
+
+              <label className={`photoDrop ${basicPreviewUrl ? "hasPreview" : ""}`} htmlFor="basicGalleryInput">
+                {basicPreviewUrl ? (
+                  <img src={basicPreviewUrl} alt="Фото для базового анализа" />
+                ) : (
+                  <div className="emptyPreview">
+                    <div className="scanFrame scanFrame-front">
+                      <span className="scanHead" />
+                      <span className="scanBody" />
+                      <span className="scanLine shoulder" />
+                      <span className="scanLine hip" />
+                    </div>
+                    <strong>{BASIC_CAPTURE_STEP.title}</strong>
+                    <small>JPG / PNG</small>
+                  </div>
+                )}
+              </label>
+              <input
+                id="basicCameraInput"
+                className="fileInput"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={onBasicFileChange}
+              />
+              <input
+                id="basicGalleryInput"
+                className="fileInput"
+                type="file"
+                accept="image/*"
+                onChange={onBasicFileChange}
+              />
+            </>
+          )}
 
           {error ? <div className="errorBox">{error}</div> : null}
 
           <div className="actionRow">
-            <label className="secondaryButton" htmlFor="cameraInput">
+            <label className="secondaryButton" htmlFor={analysisMode === "advanced" ? "cameraInput" : "basicCameraInput"}>
               Камера
             </label>
-            <label className="secondaryButton" htmlFor="galleryInput">
+            <label className="secondaryButton" htmlFor={analysisMode === "advanced" ? "galleryInput" : "basicGalleryInput"}>
               Галерея
             </label>
-            <button className="primaryButton" type="submit" disabled={isLoading || !isProtocolReady}>
+            <button
+              className="primaryButton"
+              type="submit"
+              disabled={
+                isLoading ||
+                (analysisMode === "advanced" ? !isProtocolReady || !hasAdvancedAccess : !basicCapture)
+              }
+            >
               {isLoading ? "Анализ..." : "Запустить анализ"}
             </button>
           </div>
@@ -780,6 +1037,103 @@ function AuthScreen({
   );
 }
 
+function PricingPanel({
+  billing,
+  isLoading,
+  onActivate,
+  onOrganizationChange,
+  organizationName,
+  plans
+}) {
+  const isActive = Boolean(billing?.advanced_enabled);
+  const activePlan = billing?.subscription;
+  const individualPlans = plans.filter((plan) => plan.audience === "individual");
+  const corporatePlans = plans.filter((plan) => plan.audience === "corporate");
+
+  if (isActive) {
+    return (
+      <section className="pricingPanel active">
+        <div>
+          <p className="eyebrow">Advanced доступ</p>
+          <h3>{activePlan?.name || "Advanced активен"}</h3>
+          <span>{formatSubscriptionMeta(activePlan)}</span>
+        </div>
+        <strong>Активен</strong>
+      </section>
+    );
+  }
+
+  return (
+    <section className="pricingPanel">
+      <div className="pricingHeader">
+        <div>
+          <p className="eyebrow">Advanced доступ</p>
+          <h3>5 фото: спереди, спина, два бока и тест Адамса</h3>
+        </div>
+      </div>
+
+      <div className="pricingGroup">
+        <div className="pricingGroupTitle">
+          <span>Индивидуальные</span>
+          <small>для обычных пользователей</small>
+        </div>
+        <div className="planGrid">
+          {individualPlans.map((plan) => (
+            <PlanCard isLoading={isLoading} key={plan.id} onActivate={onActivate} plan={plan} />
+          ))}
+        </div>
+      </div>
+
+      <div className="pricingGroup">
+        <div className="pricingGroupTitle">
+          <span>Корпоративные</span>
+          <small>для школ и организаций</small>
+        </div>
+        <input
+          className="textInput organizationInput"
+          value={organizationName}
+          onChange={(event) => onOrganizationChange(event.target.value)}
+          placeholder="Название школы"
+        />
+        <div className="planGrid">
+          {corporatePlans.map((plan) => (
+            <PlanCard isLoading={isLoading} key={plan.id} onActivate={onActivate} plan={plan} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PlanCard({ isLoading, onActivate, plan }) {
+  return (
+    <article className="planCard">
+      <div>
+        <span>{plan.audience_label}</span>
+        <h4>{plan.name}</h4>
+        <p>{plan.description}</p>
+      </div>
+      <div className="planCardBottom">
+        <strong>{formatPlanPrice(plan)}</strong>
+        <button className="secondaryButton" disabled={isLoading} type="button" onClick={() => onActivate(plan)}>
+          {isLoading ? "Оформление..." : "Оформить"}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function formatPlanPrice(plan) {
+  const suffix = plan.period === "month" ? "/мес" : "";
+  return `$${plan.price_usd}${suffix}`;
+}
+
+function formatSubscriptionMeta(subscription) {
+  if (!subscription) return "Advanced анализ доступен";
+  if (subscription.expires_at) return `${subscription.audience_label}, действует до ${formatTimestamp(subscription.expires_at)}`;
+  return `${subscription.audience_label}, ${subscription.billing_label}`;
+}
+
 function EmptyResult() {
   return (
     <div className="emptyResult">
@@ -788,7 +1142,7 @@ function EmptyResult() {
       </div>
       <p className="eyebrow">Результат</p>
       <h2>Нет активного отчёта</h2>
-      <p>Готов к протоколу из пяти ракурсов.</p>
+      <p>Готов к базовому анализу по одному фото или Advanced-протоколу.</p>
     </div>
   );
 }

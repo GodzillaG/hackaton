@@ -15,9 +15,11 @@ The working architecture is:
 
 The phone must interact only with the Next.js site on port `3000`. Browser uploads go to the same-origin Next.js route `/api/analyze`; Next.js then proxies the request to the local Python server at `127.0.0.1:5000`.
 
-The main screening flow is a five-view capture protocol: front, back, left side, right side, and Adams forward bend test. Do not regress it back to single-photo-only capture.
+The default screening flow is Basic analysis with one front photo. Advanced analysis is a paid five-view capture protocol: front, back, left side, right side, and Adams forward bend test. Do not regress the app to only one of these modes; both Basic and Advanced must remain available.
 
-Reports, overlay images, users, password hashes, and session tokens are stored in SQLite at `data/scolioscan.db` by default. Do not reintroduce filesystem report persistence as the primary storage path. The root `reports/` folder is legacy runtime output only and may be used as a migration source.
+Reports, overlay images, users, password hashes, session tokens, and Advanced subscription entitlements are stored in SQLite at `data/scolioscan.db` by default. Do not reintroduce filesystem report persistence as the primary storage path. The root `reports/` folder is legacy runtime output only and may be used as a migration source.
+
+Advanced pricing is currently represented as local demo billing: individual one-time `$10`, individual monthly `$25`, and corporate monthly `$99`. The backend must enforce Advanced access; do not rely only on hiding buttons in the UI.
 
 The default local account is `admin` with password `12345678`. Passwords must be stored as hashes, not plaintext.
 

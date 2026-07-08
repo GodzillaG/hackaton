@@ -6,7 +6,7 @@ import json
 import os
 import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,45 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "12345678"
 DEFAULT_DB_PATH = Path("data") / "scolioscan.db"
 PASSWORD_ITERATIONS = 260_000
+PLAN_CATALOG = [
+    {
+        "id": "individual_one_time",
+        "name": "Advanced разово",
+        "audience": "individual",
+        "audience_label": "Индивидуальный",
+        "billing": "one_time",
+        "billing_label": "разовый доступ",
+        "price_usd": 10,
+        "period": "once",
+        "advanced_enabled": True,
+        "description": "Пять ракурсов для разовой расширенной проверки.",
+    },
+    {
+        "id": "individual_monthly",
+        "name": "Advanced месяц",
+        "audience": "individual",
+        "audience_label": "Индивидуальный",
+        "billing": "monthly",
+        "billing_label": "ежемесячно",
+        "price_usd": 25,
+        "period": "month",
+        "advanced_enabled": True,
+        "description": "Неограниченный Advanced-анализ для личного аккаунта.",
+    },
+    {
+        "id": "corporate_monthly",
+        "name": "School Advanced",
+        "audience": "corporate",
+        "audience_label": "Корпоративный",
+        "billing": "monthly",
+        "billing_label": "ежемесячно",
+        "price_usd": 99,
+        "period": "month",
+        "advanced_enabled": True,
+        "description": "Расширенный протокол для школ, классов и медкабинетов.",
+    },
+]
+PLAN_BY_ID = {plan["id"]: plan for plan in PLAN_CATALOG}
 
 
 def utc_now() -> str:
@@ -135,6 +174,21 @@ class ScolioScanStorage:
                 UNIQUE(report_id, view_key),
                 FOREIGN KEY(report_id) REFERENCES reports(report_id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                plan_id TEXT NOT NULL,
+                audience TEXT NOT NULL,
+                billing TEXT NOT NULL,
+                price_usd INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                advanced_enabled INTEGER NOT NULL,
+                organization_name TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
             """
         )
 
@@ -213,6 +267,77 @@ class ScolioScanStorage:
             return
         with self.connect() as connection:
             connection.execute("DELETE FROM sessions WHERE token_hash = ?", (_token_hash(token),))
+
+    def list_plans(self) -> list[dict[str, Any]]:
+        return [dict(plan) for plan in PLAN_CATALOG]
+
+    def billing_status(self, user_id: int) -> dict[str, Any]:
+        subscription = self.active_subscription(user_id)
+        return {
+            "advanced_enabled": bool(subscription and subscription.get("advanced_enabled")),
+            "subscription": subscription,
+        }
+
+    def has_advanced_access(self, user_id: int) -> bool:
+        status = self.billing_status(user_id)
+        return bool(status["advanced_enabled"])
+
+    def active_subscription(self, user_id: int) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM subscriptions
+                WHERE user_id = ?
+                  AND status = 'active'
+                  AND advanced_enabled = 1
+                  AND (expires_at IS NULL OR expires_at > ?)
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (user_id, utc_now()),
+            ).fetchone()
+        return subscription_payload(dict(row)) if row else None
+
+    def activate_plan(self, user_id: int, plan_id: str, organization_name: str = "") -> dict[str, Any]:
+        plan = PLAN_BY_ID.get(plan_id)
+        if not plan:
+            raise ValueError("Тариф не найден.")
+
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(days=30)).isoformat() if plan["billing"] == "monthly" else None
+        organization = organization_name.strip()[:120] or None
+
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE subscriptions SET status = 'replaced' WHERE user_id = ? AND status = 'active'",
+                (user_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO subscriptions (
+                    user_id, plan_id, audience, billing, price_usd,
+                    status, advanced_enabled, organization_name, created_at, expires_at
+                )
+                VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    plan["id"],
+                    plan["audience"],
+                    plan["billing"],
+                    int(plan["price_usd"]),
+                    1 if plan["advanced_enabled"] else 0,
+                    organization,
+                    now.isoformat(),
+                    expires_at,
+                ),
+            )
+
+        subscription = self.active_subscription(user_id)
+        if not subscription:
+            raise ValueError("Не удалось активировать тариф.")
+        return subscription
 
     def save_report(
         self,
@@ -358,4 +483,23 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
         "id": user["id"],
         "username": user["username"],
         "created_at": user["created_at"],
+    }
+
+
+def subscription_payload(row: dict[str, Any]) -> dict[str, Any]:
+    plan = PLAN_BY_ID.get(row["plan_id"], {})
+    return {
+        "id": row["id"],
+        "plan_id": row["plan_id"],
+        "name": plan.get("name", row["plan_id"]),
+        "audience": row["audience"],
+        "audience_label": plan.get("audience_label", row["audience"]),
+        "billing": row["billing"],
+        "billing_label": plan.get("billing_label", row["billing"]),
+        "price_usd": row["price_usd"],
+        "status": row["status"],
+        "advanced_enabled": bool(row["advanced_enabled"]),
+        "organization_name": row.get("organization_name") or "",
+        "created_at": row["created_at"],
+        "expires_at": row.get("expires_at"),
     }

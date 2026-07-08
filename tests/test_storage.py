@@ -21,6 +21,22 @@ class StorageTests(unittest.TestCase):
             self.assertIn("pbkdf2_sha256", row["password_hash"])
             self.assertNotIn("12345678", row["password_hash"])
 
+    def test_subscription_activation_enables_advanced_access(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = ScolioScanStorage(Path(temp_dir) / "scolioscan.db")
+            storage.initialize(migrate_reports=False)
+            admin = storage.authenticate_user("admin", "12345678")
+
+            self.assertFalse(storage.has_advanced_access(admin["id"]))
+
+            subscription = storage.activate_plan(admin["id"], "individual_monthly")
+            status = storage.billing_status(admin["id"])
+
+            self.assertEqual(subscription["plan_id"], "individual_monthly")
+            self.assertTrue(status["advanced_enabled"])
+            self.assertEqual(status["subscription"]["price_usd"], 25)
+            self.assertEqual(status["subscription"]["audience"], "individual")
+
     def test_migrates_legacy_reports_under_admin(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

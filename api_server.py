@@ -180,7 +180,7 @@ def register():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    return jsonify({"token": token, "user": user}), 201
+    return jsonify({"token": token, "user": user, "billing": get_storage().billing_status(user["id"])}), 201
 
 
 @app.route("/api/auth/login", methods=["POST", "OPTIONS"])
@@ -203,7 +203,7 @@ def login():
         return jsonify({"error": "Неверный логин или пароль."}), 401
 
     token = get_storage().create_session(user["id"])
-    return jsonify({"token": token, "user": public_user(user)})
+    return jsonify({"token": token, "user": public_user(user), "billing": get_storage().billing_status(user["id"])})
 
 
 @app.route("/api/auth/me", methods=["GET", "OPTIONS"])
@@ -215,7 +215,7 @@ def me():
     if error_response:
         return error_response
 
-    return jsonify({"user": public_user(user)})
+    return jsonify({"user": public_user(user), "billing": get_storage().billing_status(user["id"])})
 
 
 @app.route("/api/auth/logout", methods=["POST", "OPTIONS"])
@@ -225,6 +225,47 @@ def logout():
 
     get_storage().revoke_session(_extract_bearer_token())
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/billing/plans", methods=["GET", "OPTIONS"])
+def billing_plans():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    return jsonify({"plans": get_storage().list_plans()})
+
+
+@app.route("/api/billing/status", methods=["GET", "OPTIONS"])
+def billing_status():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    user, error_response = _require_user()
+    if error_response:
+        return error_response
+
+    return jsonify(get_storage().billing_status(user["id"]))
+
+
+@app.route("/api/billing/checkout", methods=["POST", "OPTIONS"])
+def billing_checkout():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    user, error_response = _require_user()
+    if error_response:
+        return error_response
+
+    payload = request.get_json(silent=True) or {}
+    plan_id = str(payload.get("plan_id", "")).strip()
+    organization_name = str(payload.get("organization_name", "")).strip()
+
+    try:
+        subscription = get_storage().activate_plan(user["id"], plan_id, organization_name)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"advanced_enabled": True, "subscription": subscription})
 
 
 @app.route("/api/reports", methods=["GET", "OPTIONS"])
@@ -270,6 +311,21 @@ def analyze():
         frames = _decode_frames_from_request()
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+
+    if _is_advanced_request(frames):
+        missing_views = _missing_protocol_views(frames)
+        if missing_views:
+            return jsonify({"error": f"Для Advanced-анализа добавьте все 5 ракурсов: {', '.join(missing_views)}."}), 400
+        if not get_storage().has_advanced_access(user["id"]):
+            return (
+                jsonify(
+                    {
+                        "error": "Advanced-анализ на 5 фото доступен после оформления тарифа.",
+                        "code": "advanced_required",
+                    }
+                ),
+                402,
+            )
 
     student_id = _extract_student_id()
     current_analyzer = get_analyzer()
@@ -359,6 +415,15 @@ def _decode_frames_from_request() -> list[dict[str, Any]]:
         return [{"key": "single", "field": "image_base64", "label": "Фото", "frame": _decode_image_bytes(image_bytes)}]
 
     raise ValueError("Передайте хотя бы одно фото в протокол скрининга.")
+
+
+def _is_advanced_request(frames: list[dict[str, Any]]) -> bool:
+    return any(frame.get("key") != "single" for frame in frames)
+
+
+def _missing_protocol_views(frames: list[dict[str, Any]]) -> list[str]:
+    present = {frame.get("key") for frame in frames}
+    return [view["label"] for view in VIEW_DEFS if view["key"] not in present]
 
 
 def _decode_image_bytes(image_bytes: bytes) -> np.ndarray:
