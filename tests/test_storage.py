@@ -21,34 +21,51 @@ class StorageTests(unittest.TestCase):
             self.assertIn("pbkdf2_sha256", row["password_hash"])
             self.assertNotIn("12345678", row["password_hash"])
 
-    def test_subscription_activation_enables_advanced_access(self):
+    def test_plus_subscription_enables_advanced_access_and_quotas(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             storage = ScolioScanStorage(Path(temp_dir) / "scolioscan.db")
             storage.initialize(migrate_reports=False)
             admin = storage.authenticate_user("admin", "12345678")
 
             self.assertFalse(storage.has_advanced_access(admin["id"]))
+            self.assertEqual(storage.billing_status(admin["id"])["remaining"]["basic"], 10)
 
-            subscription = storage.activate_plan(admin["id"], "individual_monthly")
+            subscription = storage.activate_plan(admin["id"], "plus")
             status = storage.billing_status(admin["id"])
 
-            self.assertEqual(subscription["plan_id"], "individual_monthly")
+            self.assertEqual(subscription["plan_id"], "plus")
             self.assertTrue(status["advanced_enabled"])
-            self.assertEqual(status["subscription"]["price_usd"], 25)
+            self.assertEqual(status["subscription"]["price_usd"], 19)
             self.assertEqual(status["subscription"]["audience"], "individual")
+            self.assertEqual(status["remaining"], {"basic": 80, "advanced": 8})
 
-    def test_annual_subscription_gets_expiration_date(self):
+    def test_corporate_student_verification_uses_school_resources(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             storage = ScolioScanStorage(Path(temp_dir) / "scolioscan.db")
             storage.initialize(migrate_reports=False)
             admin = storage.authenticate_user("admin", "12345678")
 
-            subscription = storage.activate_plan(admin["id"], "corporate_annual", "School 42")
+            subscription = storage.verify_student_access(admin["id"], "SCHOOL-ACCESS-2026", "7B-014")
+            status = storage.billing_status(admin["id"])
 
-            self.assertEqual(subscription["plan_id"], "corporate_annual")
-            self.assertEqual(subscription["organization_name"], "School 42")
+            self.assertEqual(subscription["plan_id"], "corporate")
+            self.assertEqual(subscription["organization_name"], "ScolioScan Partner School")
+            self.assertEqual(subscription["student_external_id"], "7B-014")
             self.assertIsNotNone(subscription["expires_at"])
-            self.assertEqual(subscription["billing"], "annual")
+            self.assertEqual(subscription["billing"], "custom")
+            self.assertEqual(status["remaining"], {"basic": 2000, "advanced": 300})
+
+    def test_usage_records_reduce_current_period_quota(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = ScolioScanStorage(Path(temp_dir) / "scolioscan.db")
+            storage.initialize(migrate_reports=False)
+            admin = storage.authenticate_user("admin", "12345678")
+
+            storage.record_usage(admin["id"], "report-1", "basic")
+            status = storage.billing_status(admin["id"])
+
+            self.assertEqual(status["usage"]["basic"], 1)
+            self.assertEqual(status["remaining"]["basic"], 9)
 
     def test_migrates_legacy_reports_under_admin(self):
         with tempfile.TemporaryDirectory() as temp_dir:

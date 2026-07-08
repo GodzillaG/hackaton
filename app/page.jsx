@@ -8,7 +8,14 @@ const AUTH_TOKEN_KEY = "scolioscan_session_token";
 const REPORTS_ENDPOINT = "/api/reports";
 const BILLING_ENDPOINT = "/api/billing";
 const MAX_UPLOAD_SIDE = 1600;
-const DEFAULT_BILLING_STATUS = { advanced_enabled: false, subscription: null };
+const DEFAULT_BILLING_STATUS = {
+  advanced_enabled: false,
+  subscription: null,
+  plan: { id: "free", name: "Free" },
+  usage: { basic: 0, advanced: 0 },
+  limits: { basic: 10, advanced: 0 },
+  remaining: { basic: 10, advanced: 0 }
+};
 
 const BASIC_CAPTURE_STEP = {
   key: "single",
@@ -192,7 +199,8 @@ export default function Home() {
   const [plans, setPlans] = useState([]);
   const [billing, setBilling] = useState(DEFAULT_BILLING_STATUS);
   const [isBillingLoading, setIsBillingLoading] = useState(false);
-  const [organizationName, setOrganizationName] = useState("");
+  const [schoolCode, setSchoolCode] = useState("");
+  const [verificationStudentId, setVerificationStudentId] = useState("");
   const [studentId, setStudentId] = useState("");
   const [analysisMode, setAnalysisMode] = useState("basic");
   const [basicCapture, setBasicCapture] = useState(null);
@@ -210,7 +218,11 @@ export default function Home() {
   const completedCount = VIEW_STEPS.filter((step) => captures[step.key]).length;
   const isProtocolReady = completedCount === VIEW_STEPS.length;
   const activePreviewUrl = previewUrls[activeStep.key] || "";
-  const hasAdvancedAccess = Boolean(billing?.advanced_enabled);
+  const activePlan = billing?.plan || { id: "free", name: "Free" };
+  const remainingBasic = Number(billing?.remaining?.basic ?? 0);
+  const remainingAdvanced = Number(billing?.remaining?.advanced ?? 0);
+  const hasBasicAccess = remainingBasic > 0;
+  const hasAdvancedAccess = remainingAdvanced > 0;
 
   useEffect(() => {
     const savedToken = window.localStorage.getItem(AUTH_TOKEN_KEY);
@@ -416,6 +428,10 @@ export default function Home() {
 
   async function activatePlan(plan) {
     if (!plan || !authToken) return;
+    if (plan.id !== "plus") {
+      setError("Corporate доступ активируется через подтверждение статуса ученика.");
+      return;
+    }
     setIsBillingLoading(true);
     setError("");
 
@@ -426,10 +442,7 @@ export default function Home() {
           "Content-Type": "application/json",
           ...authHeaders()
         },
-        body: JSON.stringify({
-          plan_id: plan.id,
-          organization_name: plan.audience === "corporate" ? organizationName : ""
-        })
+        body: JSON.stringify({ plan_id: plan.id })
       });
       const payload = await response.json().catch(() => ({}));
       if (response.status === 401) {
@@ -440,6 +453,38 @@ export default function Home() {
       setBilling(payload);
     } catch (billingError) {
       setError(billingError.message || "Не удалось оформить тариф.");
+    } finally {
+      setIsBillingLoading(false);
+    }
+  }
+
+  async function verifyStudentStatus() {
+    if (!authToken) return;
+    setIsBillingLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${BILLING_ENDPOINT}/verify-student`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders()
+        },
+        body: JSON.stringify({
+          school_code: schoolCode,
+          student_id: verificationStudentId || studentId
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        clearSession();
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error || "Не удалось подтвердить статус ученика.");
+      setBilling(payload);
+      if (!studentId && (verificationStudentId || "").trim()) setStudentId(verificationStudentId.trim());
+    } catch (verificationError) {
+      setError(verificationError.message || "Не удалось подтвердить статус ученика.");
     } finally {
       setIsBillingLoading(false);
     }
@@ -574,6 +619,10 @@ export default function Home() {
       setError("Добавьте фото для базового анализа.");
       return;
     }
+    if (!hasBasicAccess) {
+      setError("Лимит Basic-анализов на текущем уровне закончился.");
+      return;
+    }
 
     const formData = new FormData();
     formData.append(BASIC_CAPTURE_STEP.fieldName, nextCapture, nextCapture.name || "basic.jpg");
@@ -591,7 +640,7 @@ export default function Home() {
     }
 
     if (!hasAdvancedAccess) {
-      setError("Advanced-анализ на 5 фото доступен после оформления тарифа.");
+      setError("На текущем уровне нет доступных Advanced-анализов.");
       return;
     }
 
@@ -636,7 +685,7 @@ export default function Home() {
 
       setApiStatus("online");
       setResult(payload);
-      await loadReports(authToken);
+      await Promise.all([loadReports(authToken), loadBilling(authToken)]);
     } catch (requestError) {
       setError(requestError.message || fallbackError);
     } finally {
@@ -701,6 +750,9 @@ export default function Home() {
             <span />
             {apiStatus === "online" ? "Готов" : apiStatus === "offline" ? "Нет связи" : "Проверка"}
           </div>
+          <a className="resourceLink" href="/learn/posture">
+            Осанка
+          </a>
         </header>
         <AuthScreen
           authError={authError}
@@ -727,12 +779,15 @@ export default function Home() {
           </div>
         </div>
         <div className="topbarActions">
+          <a className="resourceLink" href="/learn/posture">
+            Осанка
+          </a>
           <div className={`statusPill ${apiStatus}`}>
             <span />
             {apiStatus === "online" ? "Готов" : apiStatus === "offline" ? "Нет связи" : "Проверка"}
           </div>
           <div className={`planPill ${hasAdvancedAccess ? "active" : ""}`}>
-            {hasAdvancedAccess ? billing.subscription?.name || "Advanced" : "Basic"}
+            {activePlan.name || "Free"}
           </div>
           <div className="userPill">{authUser?.username}</div>
           <button className="ghostButton" type="button" onClick={logoutUser}>
@@ -771,6 +826,8 @@ export default function Home() {
               <span>5 фото</span>
             </button>
           </div>
+
+          <QuotaStrip billing={billing} />
 
           <label className="fieldLabel" htmlFor="studentId">
             ID ученика
@@ -814,9 +871,12 @@ export default function Home() {
                 billing={billing}
                 isLoading={isBillingLoading}
                 onActivate={activatePlan}
-                onOrganizationChange={setOrganizationName}
-                organizationName={organizationName}
+                onSchoolCodeChange={setSchoolCode}
+                onStudentIdChange={setVerificationStudentId}
+                onVerifyStudent={verifyStudentStatus}
                 plans={plans}
+                schoolCode={schoolCode}
+                studentId={verificationStudentId || studentId}
               />
 
               <div className="protocolProgress">
@@ -948,7 +1008,7 @@ export default function Home() {
               type="submit"
               disabled={
                 isLoading ||
-                (analysisMode === "advanced" ? !isProtocolReady || !hasAdvancedAccess : !basicCapture)
+                (analysisMode === "advanced" ? !isProtocolReady || !hasAdvancedAccess : !basicCapture || !hasBasicAccess)
               }
             >
               {isLoading ? "Анализ..." : "Запустить анализ"}
@@ -978,6 +1038,14 @@ function AuthScreen({
 
   return (
     <section className="authShell">
+      <div className="authHero">
+        <img src="/education/posture-hero.png" alt="" />
+        <div className="authHeroContent">
+          <p className="eyebrow">ScolioScan School</p>
+          <h2>Быстрый скрининг осанки для школы без очередей</h2>
+          <p>Basic для быстрых проверок, Plus для регулярного контроля и Corporate для школьных программ.</p>
+        </div>
+      </div>
       <form className="panel authPanel" onSubmit={onSubmit}>
         <div className="panelHeader">
           <div>
@@ -1041,77 +1109,80 @@ function PricingPanel({
   billing,
   isLoading,
   onActivate,
-  onOrganizationChange,
-  organizationName,
-  plans
+  onSchoolCodeChange,
+  onStudentIdChange,
+  onVerifyStudent,
+  plans,
+  schoolCode,
+  studentId
 }) {
-  const isActive = Boolean(billing?.advanced_enabled);
-  const activePlan = billing?.subscription;
-  const individualPlans = plans.filter((plan) => plan.audience === "individual");
-  const corporatePlans = plans.filter((plan) => plan.audience === "corporate");
-
-  if (isActive) {
-    return (
-      <section className="pricingPanel active">
-        <div>
-          <p className="eyebrow">Advanced доступ</p>
-          <h3>{activePlan?.name || "Advanced активен"}</h3>
-          <span>{formatSubscriptionMeta(activePlan)}</span>
-        </div>
-        <strong>Активен</strong>
-      </section>
-    );
-  }
+  const activePlanId = billing?.plan?.id || "free";
+  const freePlan = plans.find((plan) => plan.id === "free");
+  const plusPlan = plans.find((plan) => plan.id === "plus");
+  const corporatePlan = plans.find((plan) => plan.id === "corporate");
 
   return (
     <section className="pricingPanel">
       <div className="pricingHeader">
         <div>
-          <p className="eyebrow">Advanced доступ</p>
-          <h3>5 фото: спереди, спина, два бока и тест Адамса</h3>
+          <p className="eyebrow">Уровень доступа</p>
+          <h3>{billing?.plan?.name || "Free"} · {formatQuotaLine(billing)}</h3>
         </div>
       </div>
 
-      <div className="pricingGroup">
-        <div className="pricingGroupTitle">
-          <span>Индивидуальные</span>
-          <small>для обычных пользователей</small>
-        </div>
-        <div className="planGrid">
-          {individualPlans.map((plan) => (
-            <PlanCard isLoading={isLoading} key={plan.id} onActivate={onActivate} plan={plan} />
-          ))}
-        </div>
+      <div className="planGrid tierGrid">
+        {[freePlan, plusPlan, corporatePlan].filter(Boolean).map((plan) => (
+          <PlanCard
+            activePlanId={activePlanId}
+            isLoading={isLoading}
+            key={plan.id}
+            onActivate={onActivate}
+            plan={plan}
+          />
+        ))}
       </div>
 
-      <div className="pricingGroup">
+      <div className="studentVerifyPanel">
         <div className="pricingGroupTitle">
-          <span>Корпоративные</span>
-          <small>для школ и организаций</small>
+          <span>Подтвердить статус ученика</span>
+          <small>для доступа по договору школы</small>
         </div>
-        <input
-          className="textInput organizationInput"
-          value={organizationName}
-          onChange={(event) => onOrganizationChange(event.target.value)}
-          placeholder="Название школы"
-        />
-        <div className="planGrid">
-          {corporatePlans.map((plan) => (
-            <PlanCard isLoading={isLoading} key={plan.id} onActivate={onActivate} plan={plan} />
-          ))}
+        <div className="verifyGrid">
+          <input
+            className="textInput"
+            value={schoolCode}
+            onChange={(event) => onSchoolCodeChange(event.target.value)}
+            placeholder="Код школы"
+          />
+          <input
+            className="textInput"
+            value={studentId}
+            onChange={(event) => onStudentIdChange(event.target.value)}
+            placeholder="ID ученика"
+          />
+          <button className="secondaryButton" disabled={isLoading} type="button" onClick={onVerifyStudent}>
+            {isLoading ? "Проверка..." : "Подтвердить"}
+          </button>
         </div>
       </div>
     </section>
   );
 }
 
-function PlanCard({ isLoading, onActivate, plan }) {
+function PlanCard({ activePlanId, isLoading, onActivate, plan }) {
+  const isActive = activePlanId === plan.id;
+  const canActivate = plan.id === "plus" && !isActive;
+
   return (
-    <article className="planCard">
+    <article className={`planCard ${isActive ? "active" : ""}`}>
       <div>
         <span>{plan.audience_label}</span>
         <h4>{plan.name}</h4>
         <p>{plan.description}</p>
+        <div className="quotaBadges">
+          <em>{plan.basic_quota} Basic/мес</em>
+          <em>{plan.advanced_quota} Advanced/мес</em>
+        </div>
         {Array.isArray(plan.features) && plan.features.length ? (
           <ul className="planFeatures">
             {plan.features.map((feature) => (
@@ -1122,23 +1193,60 @@ function PlanCard({ isLoading, onActivate, plan }) {
       </div>
       <div className="planCardBottom">
         <strong>{formatPlanPrice(plan)}</strong>
-        <button className="secondaryButton" disabled={isLoading} type="button" onClick={() => onActivate(plan)}>
-          {isLoading ? "Оформление..." : "Оформить"}
-        </button>
+        {isActive ? (
+          <span className="activePlanBadge">Текущий</span>
+        ) : plan.id === "corporate" ? (
+          <span className="activePlanBadge neutral">Код школы</span>
+        ) : plan.id === "free" ? (
+          <span className="activePlanBadge neutral">База</span>
+        ) : (
+          <button className="secondaryButton" disabled={isLoading || !canActivate} type="button" onClick={() => onActivate(plan)}>
+            {isLoading ? "Оформление..." : "Подключить"}
+          </button>
+        )}
       </div>
     </article>
   );
 }
 
 function formatPlanPrice(plan) {
-  const suffix = plan.period === "month" ? "/мес" : plan.period === "year" ? "/год" : "";
-  return `$${plan.price_usd}${suffix}`;
+  return plan.price_label || `$${plan.price_usd}`;
 }
 
-function formatSubscriptionMeta(subscription) {
-  if (!subscription) return "Advanced анализ доступен";
-  if (subscription.expires_at) return `${subscription.audience_label}, действует до ${formatTimestamp(subscription.expires_at)}`;
-  return `${subscription.audience_label}, ${subscription.billing_label}`;
+function QuotaStrip({ billing }) {
+  const plan = billing?.plan || { name: "Free" };
+  return (
+    <section className="quotaStrip">
+      <div>
+        <span>Уровень</span>
+        <strong>{plan.name}</strong>
+      </div>
+      <QuotaMeter label="Basic" limit={billing?.limits?.basic} remaining={billing?.remaining?.basic} used={billing?.usage?.basic} />
+      <QuotaMeter label="Advanced" limit={billing?.limits?.advanced} remaining={billing?.remaining?.advanced} used={billing?.usage?.advanced} />
+    </section>
+  );
+}
+
+function QuotaMeter({ label, limit = 0, remaining = 0, used = 0 }) {
+  const safeLimit = Number(limit) || 0;
+  const safeUsed = Number(used) || 0;
+  const percent = safeLimit ? Math.min(100, Math.round((safeUsed / safeLimit) * 100)) : 100;
+
+  return (
+    <div className="quotaMeter">
+      <span>{label}</span>
+      <strong>{remaining}/{limit}</strong>
+      <div className="quotaTrack">
+        <i style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function formatQuotaLine(billing) {
+  const basic = billing?.remaining?.basic ?? 0;
+  const advanced = billing?.remaining?.advanced ?? 0;
+  return `${basic} Basic, ${advanced} Advanced доступно`;
 }
 
 function EmptyResult() {

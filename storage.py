@@ -14,93 +14,71 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "12345678"
 DEFAULT_DB_PATH = Path("data") / "scolioscan.db"
 PASSWORD_ITERATIONS = 260_000
+DEFAULT_CORPORATE_CODE = "SCHOOL-ACCESS-2026"
+DEFAULT_CORPORATE_ORG = "ScolioScan Partner School"
 PLAN_CATALOG = [
     {
-        "id": "individual_one_time",
-        "name": "Advanced разово",
+        "id": "free",
+        "name": "Free",
         "audience": "individual",
         "audience_label": "Индивидуальный",
-        "billing": "one_time",
-        "billing_label": "разовый доступ",
-        "price_usd": 10,
-        "period": "once",
+        "billing": "free",
+        "billing_label": "бесплатно",
+        "price_usd": 0,
+        "price_label": "$0",
+        "period": "month",
         "duration_days": None,
-        "advanced_enabled": True,
-        "description": "Пять ракурсов для разовой расширенной проверки.",
-        "features": ["Однократная оплата", "Отчёт с разметкой", "История результата"],
+        "basic_quota": 10,
+        "advanced_quota": 0,
+        "advanced_enabled": False,
+        "description": "Стартовый уровень для быстрых индивидуальных проверок.",
+        "features": ["10 Basic-анализов в месяц", "История отчётов", "Подходит для первичной проверки"],
     },
     {
-        "id": "individual_monthly",
-        "name": "Advanced месяц",
+        "id": "plus",
+        "name": "Plus",
         "audience": "individual",
         "audience_label": "Индивидуальный",
         "billing": "monthly",
         "billing_label": "ежемесячно",
-        "price_usd": 25,
+        "price_usd": 19,
+        "price_label": "$19/мес",
         "period": "month",
         "duration_days": 30,
+        "basic_quota": 80,
+        "advanced_quota": 8,
         "advanced_enabled": True,
-        "description": "Неограниченный Advanced-анализ для личного аккаунта.",
-        "features": ["Advanced без лимита", "История отчётов", "Подходит для семьи"],
+        "description": "Больше быстрых проверок и ежемесячный пакет Advanced-протоколов.",
+        "features": ["80 Basic-анализов в месяц", "8 Advanced-анализов в месяц", "Для семьи и регулярного контроля"],
     },
     {
-        "id": "individual_annual",
-        "name": "Advanced год",
-        "audience": "individual",
-        "audience_label": "Индивидуальный",
-        "billing": "annual",
-        "billing_label": "ежегодно",
-        "price_usd": 199,
-        "period": "year",
-        "duration_days": 365,
-        "advanced_enabled": True,
-        "description": "Годовой доступ к Advanced-анализу с выгодой по сравнению с оплатой помесячно.",
-        "features": ["12 месяцев доступа", "Экономия против месячного", "История динамики"],
-    },
-    {
-        "id": "corporate_monthly",
-        "name": "School Advanced месяц",
+        "id": "corporate",
+        "name": "Corporate",
         "audience": "corporate",
         "audience_label": "Корпоративный",
-        "billing": "monthly",
-        "billing_label": "ежемесячно",
-        "price_usd": 99,
-        "period": "month",
+        "billing": "custom",
+        "billing_label": "по договору",
+        "price_usd": 0,
+        "price_label": "Custom",
+        "period": "custom",
         "duration_days": 30,
+        "basic_quota": 2000,
+        "advanced_quota": 300,
         "advanced_enabled": True,
-        "description": "Расширенный протокол для школ, классов и медкабинетов.",
-        "features": ["Классы и медкабинет", "Локальная история", "Ежемесячная оплата"],
-    },
-    {
-        "id": "corporate_annual",
-        "name": "School Advanced год",
-        "audience": "corporate",
-        "audience_label": "Корпоративный",
-        "billing": "annual",
-        "billing_label": "ежегодно",
-        "price_usd": 999,
-        "period": "year",
-        "duration_days": 365,
-        "advanced_enabled": True,
-        "description": "Годовой тариф для одной школы с постоянным доступом к Advanced-протоколу.",
-        "features": ["Годовой школьный доступ", "Профосмотры по графику", "Архив отчётов"],
-    },
-    {
-        "id": "corporate_network_monthly",
-        "name": "District Advanced",
-        "audience": "corporate",
-        "audience_label": "Корпоративный",
-        "billing": "monthly",
-        "billing_label": "ежемесячно",
-        "price_usd": 249,
-        "period": "month",
-        "duration_days": 30,
-        "advanced_enabled": True,
-        "description": "Тариф для сети школ, районного проекта или нескольких медкабинетов.",
-        "features": ["Несколько школ", "Массовый скрининг", "Единый цифровой архив"],
+        "description": "Масштабируемый доступ для школ: цена и лимиты фиксируются в договоре.",
+        "features": ["Подтверждение статуса ученика", "Согласованные лимиты школы", "Для классов и медкабинетов"],
+        "requires_student_verification": True,
     },
 ]
 PLAN_BY_ID = {plan["id"]: plan for plan in PLAN_CATALOG}
+LEGACY_PLAN_ALIASES = {
+    "individual_one_time": "plus",
+    "individual_monthly": "plus",
+    "individual_annual": "plus",
+    "corporate_monthly": "corporate",
+    "corporate_annual": "corporate",
+    "corporate_network_monthly": "corporate",
+}
 
 
 def utc_now() -> str:
@@ -132,6 +110,16 @@ def _verify_password(password: str, stored_hash: str) -> bool:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _code_hash(code: str) -> str:
+    normalized = (code or "").strip().upper()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def current_period_key(now: datetime | None = None) -> str:
+    value = now or datetime.now(timezone.utc)
+    return value.strftime("%Y-%m")
 
 
 def _json_dumps(value: dict[str, Any]) -> str:
@@ -230,14 +218,75 @@ class ScolioScanStorage:
                 audience TEXT NOT NULL,
                 billing TEXT NOT NULL,
                 price_usd INTEGER NOT NULL,
+                price_label TEXT,
                 status TEXT NOT NULL,
                 advanced_enabled INTEGER NOT NULL,
+                basic_quota INTEGER,
+                advanced_quota INTEGER,
                 organization_name TEXT,
+                student_external_id TEXT,
                 created_at TEXT NOT NULL,
                 expires_at TEXT,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                report_id TEXT NOT NULL,
+                analysis_type TEXT NOT NULL,
+                period_key TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS corporate_access_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code_hash TEXT NOT NULL UNIQUE,
+                organization_name TEXT NOT NULL,
+                basic_quota INTEGER NOT NULL,
+                advanced_quota INTEGER NOT NULL,
+                active INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
+        )
+        self._ensure_column(connection, "subscriptions", "price_label", "TEXT")
+        self._ensure_column(connection, "subscriptions", "basic_quota", "INTEGER")
+        self._ensure_column(connection, "subscriptions", "advanced_quota", "INTEGER")
+        self._ensure_column(connection, "subscriptions", "student_external_id", "TEXT")
+        self._ensure_default_corporate_code(connection)
+
+    @staticmethod
+    def _ensure_column(connection, table_name: str, column_name: str, definition: str) -> None:
+        rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        if column_name not in {row["name"] for row in rows}:
+            connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+    def _ensure_default_corporate_code(self, connection) -> None:
+        code_hash = _code_hash(DEFAULT_CORPORATE_CODE)
+        exists = connection.execute(
+            "SELECT 1 FROM corporate_access_codes WHERE code_hash = ?",
+            (code_hash,),
+        ).fetchone()
+        if exists:
+            return
+        corporate_plan = plan_by_id("corporate")
+        connection.execute(
+            """
+            INSERT INTO corporate_access_codes (
+                code_hash, organization_name, basic_quota,
+                advanced_quota, active, created_at
+            )
+            VALUES (?, ?, ?, ?, 1, ?)
+            """,
+            (
+                code_hash,
+                DEFAULT_CORPORATE_ORG,
+                int(corporate_plan["basic_quota"]),
+                int(corporate_plan["advanced_quota"]),
+                utc_now(),
+            ),
         )
 
     def ensure_user(self, username: str, password: str, connection=None) -> dict[str, Any]:
@@ -317,18 +366,92 @@ class ScolioScanStorage:
             connection.execute("DELETE FROM sessions WHERE token_hash = ?", (_token_hash(token),))
 
     def list_plans(self) -> list[dict[str, Any]]:
-        return [dict(plan) for plan in PLAN_CATALOG]
+        return [public_plan(plan) for plan in PLAN_CATALOG]
 
     def billing_status(self, user_id: int) -> dict[str, Any]:
-        subscription = self.active_subscription(user_id)
-        return {
-            "advanced_enabled": bool(subscription and subscription.get("advanced_enabled")),
-            "subscription": subscription,
-        }
+        return self.entitlement_for_user(user_id)
 
     def has_advanced_access(self, user_id: int) -> bool:
-        status = self.billing_status(user_id)
-        return bool(status["advanced_enabled"])
+        status = self.entitlement_for_user(user_id)
+        return int(status["remaining"]["advanced"]) > 0
+
+    def entitlement_for_user(self, user_id: int) -> dict[str, Any]:
+        subscription = self.active_subscription(user_id)
+        plan = plan_by_id(subscription["plan_id"] if subscription else "free")
+        period_key = current_period_key()
+        used = self.usage_for_period(user_id, period_key)
+        limits = {
+            "basic": int(subscription.get("basic_quota") if subscription else plan["basic_quota"]),
+            "advanced": int(subscription.get("advanced_quota") if subscription else plan["advanced_quota"]),
+        }
+        remaining = {
+            "basic": max(0, limits["basic"] - used["basic"]),
+            "advanced": max(0, limits["advanced"] - used["advanced"]),
+        }
+
+        return {
+            "advanced_enabled": remaining["advanced"] > 0,
+            "subscription": subscription,
+            "plan": public_plan(plan),
+            "period_key": period_key,
+            "usage": used,
+            "limits": limits,
+            "remaining": remaining,
+        }
+
+    def usage_for_period(self, user_id: int, period_key: str) -> dict[str, int]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT analysis_type, COUNT(*) AS count
+                FROM usage_events
+                WHERE user_id = ? AND period_key = ?
+                GROUP BY analysis_type
+                """,
+                (user_id, period_key),
+            ).fetchall()
+
+        counts = {row["analysis_type"]: int(row["count"]) for row in rows}
+        return {
+            "basic": counts.get("basic", 0),
+            "advanced": counts.get("advanced", 0),
+        }
+
+    def analysis_allowance(self, user_id: int, analysis_type: str) -> dict[str, Any]:
+        if analysis_type not in {"basic", "advanced"}:
+            raise ValueError("Некорректный тип анализа.")
+
+        status = self.entitlement_for_user(user_id)
+        remaining = int(status["remaining"][analysis_type])
+        allowed = remaining > 0
+        if allowed:
+            return {"allowed": True, "billing": status}
+
+        if analysis_type == "advanced" and status["plan"]["id"] == "free":
+            message = "Advanced-анализ доступен на Plus или Corporate."
+            code = "advanced_required"
+        else:
+            message = "Лимит анализов на текущем уровне закончился."
+            code = "quota_exceeded"
+
+        return {
+            "allowed": False,
+            "error": message,
+            "code": code,
+            "billing": status,
+        }
+
+    def record_usage(self, user_id: int, report_id: str, analysis_type: str) -> None:
+        if analysis_type not in {"basic", "advanced"}:
+            raise ValueError("Некорректный тип анализа.")
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO usage_events (user_id, report_id, analysis_type, period_key, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, report_id, analysis_type, current_period_key(), utc_now()),
+            )
 
     def active_subscription(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as connection:
@@ -347,15 +470,24 @@ class ScolioScanStorage:
             ).fetchone()
         return subscription_payload(dict(row)) if row else None
 
-    def activate_plan(self, user_id: int, plan_id: str, organization_name: str = "") -> dict[str, Any]:
-        plan = PLAN_BY_ID.get(plan_id)
-        if not plan:
-            raise ValueError("Тариф не найден.")
+    def activate_plan(
+        self,
+        user_id: int,
+        plan_id: str,
+        organization_name: str = "",
+        basic_quota: int | None = None,
+        advanced_quota: int | None = None,
+        student_external_id: str = "",
+    ) -> dict[str, Any]:
+        plan = plan_by_id(plan_id)
 
         now = datetime.now(timezone.utc)
         duration_days = plan.get("duration_days")
         expires_at = (now + timedelta(days=int(duration_days))).isoformat() if duration_days else None
         organization = organization_name.strip()[:120] or None
+        student_id = student_external_id.strip()[:80] or None
+        resolved_basic_quota = int(basic_quota if basic_quota is not None else plan["basic_quota"])
+        resolved_advanced_quota = int(advanced_quota if advanced_quota is not None else plan["advanced_quota"])
 
         with self.connect() as connection:
             connection.execute(
@@ -366,9 +498,11 @@ class ScolioScanStorage:
                 """
                 INSERT INTO subscriptions (
                     user_id, plan_id, audience, billing, price_usd,
-                    status, advanced_enabled, organization_name, created_at, expires_at
+                    price_label, status, advanced_enabled, basic_quota,
+                    advanced_quota, organization_name, student_external_id,
+                    created_at, expires_at
                 )
-                VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
@@ -376,8 +510,12 @@ class ScolioScanStorage:
                     plan["audience"],
                     plan["billing"],
                     int(plan["price_usd"]),
+                    plan.get("price_label", ""),
                     1 if plan["advanced_enabled"] else 0,
+                    resolved_basic_quota,
+                    resolved_advanced_quota,
                     organization,
+                    student_id,
                     now.isoformat(),
                     expires_at,
                 ),
@@ -387,6 +525,34 @@ class ScolioScanStorage:
         if not subscription:
             raise ValueError("Не удалось активировать тариф.")
         return subscription
+
+    def verify_student_access(self, user_id: int, school_code: str, student_external_id: str) -> dict[str, Any]:
+        normalized_student_id = student_external_id.strip()
+        if len(normalized_student_id) < 2:
+            raise ValueError("Введите ID ученика.")
+
+        code_hash = _code_hash(school_code)
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM corporate_access_codes
+                WHERE code_hash = ? AND active = 1
+                """,
+                (code_hash,),
+            ).fetchone()
+
+        if not row:
+            raise ValueError("Код школы не найден или больше не активен.")
+
+        return self.activate_plan(
+            user_id,
+            "corporate",
+            organization_name=row["organization_name"],
+            basic_quota=int(row["basic_quota"]),
+            advanced_quota=int(row["advanced_quota"]),
+            student_external_id=normalized_student_id,
+        )
 
     def save_report(
         self,
@@ -535,20 +701,62 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def plan_by_id(plan_id: str) -> dict[str, Any]:
+    resolved_id = LEGACY_PLAN_ALIASES.get(plan_id, plan_id)
+    plan = PLAN_BY_ID.get(resolved_id)
+    if not plan:
+        raise ValueError("Тариф не найден.")
+    return plan
+
+
+def public_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": plan["id"],
+        "name": plan["name"],
+        "audience": plan["audience"],
+        "audience_label": plan["audience_label"],
+        "billing": plan["billing"],
+        "billing_label": plan["billing_label"],
+        "price_usd": plan["price_usd"],
+        "price_label": plan.get("price_label") or _plan_price_label(plan),
+        "period": plan["period"],
+        "basic_quota": int(plan["basic_quota"]),
+        "advanced_quota": int(plan["advanced_quota"]),
+        "advanced_enabled": bool(plan["advanced_enabled"]),
+        "description": plan["description"],
+        "features": list(plan.get("features", [])),
+        "requires_student_verification": bool(plan.get("requires_student_verification", False)),
+    }
+
+
+def _plan_price_label(plan: dict[str, Any]) -> str:
+    if plan["billing"] == "custom":
+        return "Custom"
+    if plan["price_usd"] == 0:
+        return "$0"
+    suffix = "/мес" if plan["period"] == "month" else ""
+    return f"${plan['price_usd']}{suffix}"
+
+
 def subscription_payload(row: dict[str, Any]) -> dict[str, Any]:
-    plan = PLAN_BY_ID.get(row["plan_id"], {})
+    plan = plan_by_id(row["plan_id"])
     return {
         "id": row["id"],
-        "plan_id": row["plan_id"],
-        "name": plan.get("name", row["plan_id"]),
+        "plan_id": plan["id"],
+        "source_plan_id": row["plan_id"],
+        "name": plan["name"],
         "audience": row["audience"],
-        "audience_label": plan.get("audience_label", row["audience"]),
+        "audience_label": plan["audience_label"],
         "billing": row["billing"],
-        "billing_label": plan.get("billing_label", row["billing"]),
+        "billing_label": plan["billing_label"],
         "price_usd": row["price_usd"],
+        "price_label": row.get("price_label") or plan.get("price_label") or _plan_price_label(plan),
         "status": row["status"],
         "advanced_enabled": bool(row["advanced_enabled"]),
+        "basic_quota": int(row.get("basic_quota") or plan["basic_quota"]),
+        "advanced_quota": int(row.get("advanced_quota") or plan["advanced_quota"]),
         "organization_name": row.get("organization_name") or "",
+        "student_external_id": row.get("student_external_id") or "",
         "created_at": row["created_at"],
         "expires_at": row.get("expires_at"),
     }

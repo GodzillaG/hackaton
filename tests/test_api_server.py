@@ -100,6 +100,8 @@ class ApiServerTests(unittest.TestCase):
         me_payload = me_response.get_json()
         self.assertEqual(me_payload["user"]["username"], "admin")
         self.assertFalse(me_payload["billing"]["advanced_enabled"])
+        self.assertEqual(me_payload["billing"]["plan"]["id"], "free")
+        self.assertEqual(me_payload["billing"]["remaining"]["basic"], 10)
 
         logout_response = self.client.post("/api/auth/logout", headers=headers)
         self.assertEqual(logout_response.status_code, 200)
@@ -116,15 +118,17 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(payload["user"]["username"], "school01")
         self.assertTrue(payload["token"])
         self.assertFalse(payload["billing"]["advanced_enabled"])
+        self.assertEqual(payload["billing"]["plan"]["id"], "free")
 
     def test_billing_checkout_enables_advanced(self):
         plans_response = self.client.get("/api/billing/plans")
         plans_payload = plans_response.get_json()
         self.assertEqual(plans_response.status_code, 200)
-        self.assertTrue(any(plan["id"] == "individual_one_time" for plan in plans_payload["plans"]))
-        self.assertTrue(any(plan["id"] == "individual_annual" for plan in plans_payload["plans"]))
-        self.assertTrue(any(plan["id"] == "corporate_annual" for plan in plans_payload["plans"]))
-        self.assertTrue(any(plan["id"] == "corporate_network_monthly" for plan in plans_payload["plans"]))
+        self.assertEqual([plan["id"] for plan in plans_payload["plans"]], ["free", "plus", "corporate"])
+        plus_plan = next(plan for plan in plans_payload["plans"] if plan["id"] == "plus")
+        self.assertEqual(plus_plan["price_usd"], 19)
+        self.assertEqual(plus_plan["basic_quota"], 80)
+        self.assertEqual(plus_plan["advanced_quota"], 8)
 
         status_response = self.client.get("/api/billing/status", headers=self.auth_headers)
         self.assertEqual(status_response.status_code, 200)
@@ -132,15 +136,29 @@ class ApiServerTests(unittest.TestCase):
 
         checkout_response = self.client.post(
             "/api/billing/checkout",
-            json={"plan_id": "corporate_monthly", "organization_name": "School 42"},
+            json={"plan_id": "plus"},
             headers=self.auth_headers,
         )
         checkout_payload = checkout_response.get_json()
 
         self.assertEqual(checkout_response.status_code, 200)
         self.assertTrue(checkout_payload["advanced_enabled"])
-        self.assertEqual(checkout_payload["subscription"]["audience"], "corporate")
-        self.assertEqual(checkout_payload["subscription"]["organization_name"], "School 42")
+        self.assertEqual(checkout_payload["plan"]["id"], "plus")
+        self.assertEqual(checkout_payload["remaining"]["advanced"], 8)
+
+    def test_verify_student_status_enables_corporate_resources(self):
+        response = self.client.post(
+            "/api/billing/verify-student",
+            json={"school_code": "SCHOOL-ACCESS-2026", "student_id": "7B-014"},
+            headers=self.auth_headers,
+        )
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["plan"]["id"], "corporate")
+        self.assertEqual(payload["subscription"]["student_external_id"], "7B-014")
+        self.assertEqual(payload["remaining"]["basic"], 2000)
+        self.assertEqual(payload["remaining"]["advanced"], 300)
 
     def test_analyze_requires_login(self):
         response = self.client.post("/api/analyze", data={})
@@ -183,6 +201,7 @@ class ApiServerTests(unittest.TestCase):
         restored_response = self.client.get(f"/api/reports/{payload['report_id']}", headers=self.auth_headers)
         self.assertEqual(restored_response.status_code, 200)
         self.assertTrue(restored_response.get_json()["overlay_image"].startswith("data:image/jpeg;base64,"))
+        self.assertEqual(self.storage.billing_status(self.admin["id"])["usage"]["basic"], 1)
 
     def test_advanced_protocol_requires_paid_plan(self):
         response = self.client.post(
@@ -205,7 +224,7 @@ class ApiServerTests(unittest.TestCase):
         self.assertIn("Advanced", payload["error"])
 
     def test_advanced_protocol_requires_all_five_views(self):
-        self.storage.activate_plan(self.admin["id"], "individual_one_time")
+        self.storage.activate_plan(self.admin["id"], "plus")
 
         response = self.client.post(
             "/api/analyze",
@@ -222,7 +241,7 @@ class ApiServerTests(unittest.TestCase):
         self.assertIn("все 5 ракурсов", payload["error"])
 
     def test_analyze_accepts_five_view_protocol(self):
-        self.storage.activate_plan(self.admin["id"], "individual_monthly")
+        self.storage.activate_plan(self.admin["id"], "plus")
 
         response = self.client.post(
             "/api/analyze",
@@ -279,6 +298,7 @@ class ApiServerTests(unittest.TestCase):
         reports_response = self.client.get("/api/reports", headers=self.auth_headers)
         self.assertEqual(reports_response.status_code, 200)
         self.assertTrue(any(item["report_id"] == payload["report_id"] for item in reports_response.get_json()["reports"]))
+        self.assertEqual(self.storage.billing_status(self.admin["id"])["usage"]["advanced"], 1)
 
     def test_analyze_rejects_empty_request(self):
         response = self.client.post("/api/analyze", data={}, headers=self.auth_headers)

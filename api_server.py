@@ -258,14 +258,36 @@ def billing_checkout():
 
     payload = request.get_json(silent=True) or {}
     plan_id = str(payload.get("plan_id", "")).strip()
-    organization_name = str(payload.get("organization_name", "")).strip()
+    if plan_id != "plus":
+        return jsonify({"error": "Через checkout подключается только Plus. Corporate активируется через школьный доступ."}), 400
 
     try:
-        subscription = get_storage().activate_plan(user["id"], plan_id, organization_name)
+        get_storage().activate_plan(user["id"], plan_id)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    return jsonify({"advanced_enabled": True, "subscription": subscription})
+    return jsonify(get_storage().billing_status(user["id"]))
+
+
+@app.route("/api/billing/verify-student", methods=["POST", "OPTIONS"])
+def billing_verify_student():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    user, error_response = _require_user()
+    if error_response:
+        return error_response
+
+    payload = request.get_json(silent=True) or {}
+    school_code = str(payload.get("school_code", "")).strip()
+    student_external_id = str(payload.get("student_id", "")).strip()
+
+    try:
+        get_storage().verify_student_access(user["id"], school_code, student_external_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(get_storage().billing_status(user["id"]))
 
 
 @app.route("/api/reports", methods=["GET", "OPTIONS"])
@@ -312,20 +334,25 @@ def analyze():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    if _is_advanced_request(frames):
+    is_advanced = _is_advanced_request(frames)
+    if is_advanced:
         missing_views = _missing_protocol_views(frames)
         if missing_views:
             return jsonify({"error": f"Для Advanced-анализа добавьте все 5 ракурсов: {', '.join(missing_views)}."}), 400
-        if not get_storage().has_advanced_access(user["id"]):
-            return (
-                jsonify(
-                    {
-                        "error": "Advanced-анализ на 5 фото доступен после оформления тарифа.",
-                        "code": "advanced_required",
-                    }
-                ),
-                402,
-            )
+
+    analysis_type = "advanced" if is_advanced else "basic"
+    allowance = get_storage().analysis_allowance(user["id"], analysis_type)
+    if not allowance["allowed"]:
+        return (
+            jsonify(
+                {
+                    "error": allowance["error"],
+                    "code": allowance["code"],
+                    "billing": allowance["billing"],
+                }
+            ),
+            402,
+        )
 
     student_id = _extract_student_id()
     current_analyzer = get_analyzer()
@@ -336,6 +363,7 @@ def analyze():
         annotated = current_analyzer.draw_overlay(frame, mp_results, screening)
         response = _build_response(student_id, screening, annotated)
         _persist_report(response, annotated, user["id"])
+        get_storage().record_usage(user["id"], response["report_id"], "basic")
         return jsonify(response)
 
     view_results = []
@@ -350,6 +378,7 @@ def analyze():
 
     response = _build_multi_view_response(student_id, view_results)
     _persist_multi_view_report(response, annotated_views, user["id"])
+    get_storage().record_usage(user["id"], response["report_id"], "advanced")
 
     return jsonify(response)
 
