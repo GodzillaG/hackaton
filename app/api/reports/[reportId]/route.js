@@ -3,18 +3,18 @@ const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://127.0.0.1:5000";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request) {
+export async function GET(request, { params }) {
+  const { reportId } = await params;
+
   try {
-    const formData = await request.formData();
     const authorization = request.headers.get("authorization");
     const headers = authorization ? { authorization } : undefined;
-    const upstream = await fetch(`${PYTHON_API_URL}/api/analyze`, {
-      method: "POST",
-      body: formData,
-      headers
+    const upstream = await fetch(`${PYTHON_API_URL}/api/reports/${encodeURIComponent(reportId)}`, {
+      headers,
+      cache: "no-store"
     });
-
     const body = await upstream.text();
+
     return new Response(body, {
       status: upstream.status,
       headers: {
@@ -24,7 +24,7 @@ export async function POST(request) {
   } catch (error) {
     return Response.json(
       {
-        error: `Сервер анализа недоступен: ${error.message}`
+        error: `Сервер отчётов недоступен: ${error.message}`
       },
       { status: 503 }
     );

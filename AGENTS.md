@@ -8,6 +8,7 @@ The working architecture is:
 
 - Next.js app in `app/`
 - Flask analysis server in `api_server.py`
+- SQLite persistence and auth in `storage.py`
 - pose and silhouette logic in `pose_analyzer.py`
 - MediaPipe lite model in `models/pose_landmarker_lite.task`
 - public demo images in `public/test_images/`
@@ -15,6 +16,10 @@ The working architecture is:
 The phone must interact only with the Next.js site on port `3000`. Browser uploads go to the same-origin Next.js route `/api/analyze`; Next.js then proxies the request to the local Python server at `127.0.0.1:5000`.
 
 The main screening flow is a five-view capture protocol: front, back, left side, right side, and Adams forward bend test. Do not regress it back to single-photo-only capture.
+
+Reports, overlay images, users, password hashes, and session tokens are stored in SQLite at `data/scolioscan.db` by default. Do not reintroduce filesystem report persistence as the primary storage path. The root `reports/` folder is legacy runtime output only and may be used as a migration source.
+
+The default local account is `admin` with password `12345678`. Passwords must be stored as hashes, not plaintext.
 
 ## User Preferences
 
@@ -67,6 +72,7 @@ Only port `3000` needs to be reachable from the phone. Do not reintroduce a visi
 
 - Git author should be `GodzillaG <kabi052009@gmail.com>`.
 - Do not commit `.next/`, `.venv/`, `node_modules/`, `reports/`, `archive/`, or root `/test_images/`.
+- Do not commit SQLite runtime databases from `data/`.
 - Keep `public/test_images/` tracked because the site uses those images.
 - Commit only intentional project files.
 - Push finished work to `origin/main` unless the user asks for another branch.

@@ -58,6 +58,13 @@ label {
   margin-bottom: 18px;
 }
 
+.topbarActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -147,6 +154,24 @@ h4 {
   background: var(--red);
 }
 
+.userPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  max-width: 160px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #344054;
+  background: #ffffff;
+  font-size: 0.86rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
@@ -164,6 +189,50 @@ h4 {
 .capturePanel,
 .resultPanel {
   padding: 18px;
+}
+
+.authShell {
+  display: grid;
+  place-items: start center;
+  padding-top: min(8vh, 72px);
+}
+
+.authPanel {
+  width: min(420px, 100%);
+  padding: 18px;
+}
+
+.authModeSwitch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+
+.authModeSwitch button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 10px;
+  color: #475467;
+  background: transparent;
+  font-size: 0.8rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.authModeSwitch button.active {
+  color: var(--text);
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+}
+
+.authSubmit {
+  width: 100%;
+  margin-top: 14px;
 }
 
 .panelHeader,
@@ -299,6 +368,94 @@ h4 {
 .sampleHeader a {
   color: var(--blue);
   text-decoration: none;
+}
+
+.sampleHeader small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.historyBlock {
+  margin-bottom: 14px;
+}
+
+.reportList {
+  display: grid;
+  gap: 8px;
+}
+
+.reportButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: #344054;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.reportButton:hover {
+  border-color: var(--blue);
+}
+
+.reportButton div {
+  min-width: 0;
+}
+
+.reportButton strong,
+.reportButton span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reportButton strong {
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.reportButton span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.riskText {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.riskText-high {
+  color: var(--red);
+}
+
+.riskText-moderate {
+  color: var(--amber);
+}
+
+.riskText-low {
+  color: var(--green);
+}
+
+.historyEmpty {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #f8fafc;
+  font-size: 0.84rem;
+  font-weight: 750;
 }
 
 .sampleGrid {
@@ -967,6 +1124,18 @@ h4 {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .topbarActions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .topbarActions .statusPill,
+  .topbarActions .ghostButton,
+  .userPill {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .brandMark {

@@ -28,6 +28,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from pose_analyzer import ScoliosisScreeningAnalyzer, THRESHOLDS
+from storage import ScolioScanStorage, normalize_username, public_user, validate_password
 
 REPORTS_DIR = Path("reports")
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
@@ -47,6 +48,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 _analyzer: ScoliosisScreeningAnalyzer | None = None
+_storage: ScolioScanStorage | None = None
 
 
 def get_analyzer() -> ScoliosisScreeningAnalyzer:
@@ -54,6 +56,14 @@ def get_analyzer() -> ScoliosisScreeningAnalyzer:
     if _analyzer is None:
         _analyzer = ScoliosisScreeningAnalyzer(static_image_mode=True)
     return _analyzer
+
+
+def get_storage() -> ScolioScanStorage:
+    global _storage
+    if _storage is None:
+        _storage = ScolioScanStorage()
+        _storage.initialize(reports_dir=REPORTS_DIR)
+    return _storage
 
 
 METRIC_DEFS = [
@@ -126,7 +136,7 @@ RISK_PROFILE = {
 
 def _add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
     return response
 
@@ -142,6 +152,7 @@ def handle_large_file(_: RequestEntityTooLarge):
 @app.route("/health", methods=["GET"])
 def health():
     current_analyzer = get_analyzer()
+    current_storage = get_storage()
     return jsonify(
         {
             "status": "ok",
@@ -149,8 +160,100 @@ def health():
             "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
             "analysis_engine": current_analyzer.engine,
             "pose_model": str(getattr(current_analyzer, "task_model_path", "")),
+            "database": str(current_storage.db_path),
         }
     )
+
+
+@app.route("/api/auth/register", methods=["POST", "OPTIONS"])
+def register():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    payload = request.get_json(silent=True) or {}
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+
+    try:
+        user = get_storage().create_user(username, password)
+        token = get_storage().create_session(user["id"])
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"token": token, "user": user}), 201
+
+
+@app.route("/api/auth/login", methods=["POST", "OPTIONS"])
+def login():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    payload = request.get_json(silent=True) or {}
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+
+    try:
+        normalize_username(username)
+        validate_password(password)
+    except ValueError:
+        return jsonify({"error": "Неверный логин или пароль."}), 401
+
+    user = get_storage().authenticate_user(username, password)
+    if not user:
+        return jsonify({"error": "Неверный логин или пароль."}), 401
+
+    token = get_storage().create_session(user["id"])
+    return jsonify({"token": token, "user": public_user(user)})
+
+
+@app.route("/api/auth/me", methods=["GET", "OPTIONS"])
+def me():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    user, error_response = _require_user()
+    if error_response:
+        return error_response
+
+    return jsonify({"user": public_user(user)})
+
+
+@app.route("/api/auth/logout", methods=["POST", "OPTIONS"])
+def logout():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    get_storage().revoke_session(_extract_bearer_token())
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/reports", methods=["GET", "OPTIONS"])
+def list_reports():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    user, error_response = _require_user()
+    if error_response:
+        return error_response
+
+    reports = get_storage().list_reports(user["id"])
+    return jsonify({"reports": reports})
+
+
+@app.route("/api/reports/<report_id>", methods=["GET", "OPTIONS"])
+def get_report(report_id: str):
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    user, error_response = _require_user()
+    if error_response:
+        return error_response
+
+    stored = get_storage().get_report(user["id"], report_id)
+    if not stored:
+        return jsonify({"error": "Отчёт не найден."}), 404
+
+    return jsonify(_restore_overlay_images(stored["report"], stored["images"]))
 
 
 @app.route("/analyze", methods=["POST", "OPTIONS"])
@@ -158,6 +261,10 @@ def health():
 def analyze():
     if request.method == "OPTIONS":
         return ("", 204)
+
+    user, error_response = _require_user()
+    if error_response:
+        return error_response
 
     try:
         frames = _decode_frames_from_request()
@@ -172,7 +279,7 @@ def analyze():
         screening, mp_results = current_analyzer.analyze_frame(frame)
         annotated = current_analyzer.draw_overlay(frame, mp_results, screening)
         response = _build_response(student_id, screening, annotated)
-        _persist_report(response, annotated)
+        _persist_report(response, annotated, user["id"])
         return jsonify(response)
 
     view_results = []
@@ -186,9 +293,24 @@ def analyze():
         annotated_views[item["key"]] = annotated
 
     response = _build_multi_view_response(student_id, view_results)
-    _persist_multi_view_report(response, annotated_views)
+    _persist_multi_view_report(response, annotated_views, user["id"])
 
     return jsonify(response)
+
+
+def _extract_bearer_token() -> str:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    return request.headers.get("X-Session-Token", "").strip()
+
+
+def _require_user():
+    token = _extract_bearer_token()
+    user = get_storage().user_by_token(token)
+    if not user:
+        return None, (jsonify({"error": "Войдите в аккаунт."}), 401)
+    return user, None
 
 
 def _extract_student_id() -> str:
@@ -581,6 +703,11 @@ def _care_plan(risk_level: str, score: int, landmarks_found: bool) -> list[dict[
 
 
 def _encode_jpeg_data_url(image: np.ndarray) -> str:
+    encoded = base64.b64encode(_encode_jpeg_bytes(image)).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
+def _encode_jpeg_bytes(image: np.ndarray) -> bytes:
     h, w = image.shape[:2]
     scale = min(1.0, MAX_RESPONSE_IMAGE_SIDE / max(h, w))
     if scale < 1.0:
@@ -588,51 +715,61 @@ def _encode_jpeg_data_url(image: np.ndarray) -> str:
 
     ok, buffer = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     if not ok:
-        return ""
+        return b""
 
-    encoded = base64.b64encode(buffer).decode("ascii")
+    return buffer.tobytes()
+
+
+def _jpeg_data_url_from_bytes(image_bytes: bytes) -> str:
+    if not image_bytes:
+        return ""
+    encoded = base64.b64encode(image_bytes).decode("ascii")
     return f"data:image/jpeg;base64,{encoded}"
 
 
-def _persist_report(response: dict[str, Any], annotated: np.ndarray) -> None:
-    REPORTS_DIR.mkdir(exist_ok=True)
-    report_id = response["report_id"]
-    image_path = REPORTS_DIR / f"{report_id}.jpg"
-    json_path = REPORTS_DIR / f"{report_id}.json"
-
-    cv2.imwrite(str(image_path), annotated)
-
-    persisted = {key: value for key, value in response.items() if key != "overlay_image"}
-    persisted["image_file"] = str(image_path)
-
-    with json_path.open("w", encoding="utf-8") as file:
-        json.dump(persisted, file, ensure_ascii=False, indent=2)
+def _persist_report(response: dict[str, Any], annotated: np.ndarray, user_id: int) -> None:
+    get_storage().save_report(
+        user_id,
+        _strip_overlay_images(response),
+        {"single": _encode_jpeg_bytes(annotated)},
+    )
 
 
-def _persist_multi_view_report(response: dict[str, Any], annotated_views: dict[str, np.ndarray]) -> None:
-    REPORTS_DIR.mkdir(exist_ok=True)
-    report_id = response["report_id"]
-    image_files = {}
-
-    for view_key, annotated in annotated_views.items():
-        image_path = REPORTS_DIR / f"{report_id}_{view_key}.jpg"
-        cv2.imwrite(str(image_path), annotated)
-        image_files[view_key] = str(image_path)
-
-    persisted = _strip_overlay_images(response)
-    persisted["image_files"] = image_files
-
-    json_path = REPORTS_DIR / f"{report_id}.json"
-    with json_path.open("w", encoding="utf-8") as file:
-        json.dump(persisted, file, ensure_ascii=False, indent=2)
+def _persist_multi_view_report(response: dict[str, Any], annotated_views: dict[str, np.ndarray], user_id: int) -> None:
+    get_storage().save_report(
+        user_id,
+        _strip_overlay_images(response),
+        {view_key: _encode_jpeg_bytes(annotated) for view_key, annotated in annotated_views.items()},
+    )
 
 
 def _strip_overlay_images(value):
     if isinstance(value, dict):
-        return {key: _strip_overlay_images(item) for key, item in value.items() if key != "overlay_image"}
+        return {
+            key: _strip_overlay_images(item)
+            for key, item in value.items()
+            if key not in {"overlay_image", "image_file", "image_files"}
+        }
     if isinstance(value, list):
         return [_strip_overlay_images(item) for item in value]
     return value
+
+
+def _restore_overlay_images(report: dict[str, Any], images: dict[str, bytes]) -> dict[str, Any]:
+    restored = json.loads(json.dumps(report, ensure_ascii=False))
+
+    if restored.get("mode") == "multi_view" and isinstance(restored.get("views"), list):
+        for view in restored["views"]:
+            view_key = view.get("view_key")
+            if view_key in images:
+                view["overlay_image"] = _jpeg_data_url_from_bytes(images[view_key])
+        primary_key = "front" if "front" in images else next(iter(images), "")
+        restored["overlay_image"] = _jpeg_data_url_from_bytes(images.get(primary_key, b""))
+    else:
+        primary_key = "single" if "single" in images else next(iter(images), "")
+        restored["overlay_image"] = _jpeg_data_url_from_bytes(images.get(primary_key, b""))
+
+    return restored
 
 
 def _report_id(student_id: str, timestamp: datetime) -> str:
@@ -647,4 +784,5 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
+    get_storage()
     app.run(host=args.host, port=args.port, debug=args.debug)

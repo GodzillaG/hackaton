@@ -1,12 +1,15 @@
 import io
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 import api_server
 from pose_analyzer import ScreeningResult
+from storage import ScolioScanStorage
 
 
 class FakeAnalyzer:
@@ -54,17 +57,21 @@ def jpeg_bytes(width=64, height=96):
 class ApiServerTests(unittest.TestCase):
     def setUp(self):
         self.original_analyzer = api_server._analyzer
-        self.original_persist_report = api_server._persist_report
-        self.original_persist_multi_view_report = api_server._persist_multi_view_report
+        self.original_storage = api_server._storage
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.storage = ScolioScanStorage(Path(self.temp_dir.name) / "test.db")
+        self.storage.initialize(migrate_reports=False)
         api_server._analyzer = FakeAnalyzer()
-        api_server._persist_report = lambda _response, _annotated: None
-        api_server._persist_multi_view_report = lambda _response, _annotated_views: None
+        api_server._storage = self.storage
+        self.admin = self.storage.authenticate_user("admin", "12345678")
+        self.token = self.storage.create_session(self.admin["id"])
+        self.auth_headers = {"Authorization": f"Bearer {self.token}"}
         self.client = api_server.app.test_client()
 
     def tearDown(self):
         api_server._analyzer = self.original_analyzer
-        api_server._persist_report = self.original_persist_report
-        api_server._persist_multi_view_report = self.original_persist_multi_view_report
+        api_server._storage = self.original_storage
+        self.temp_dir.cleanup()
 
     def test_health_uses_configured_analyzer(self):
         response = self.client.get("/health")
@@ -74,6 +81,45 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["analysis_engine"], "unit_test_pose")
         self.assertEqual(payload["pose_model"], "models/unit-test.task")
+        self.assertTrue(payload["database"].endswith("test.db"))
+
+    def test_auth_login_me_and_logout(self):
+        response = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "12345678"},
+        )
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["user"]["username"], "admin")
+        self.assertTrue(payload["token"])
+
+        headers = {"Authorization": f"Bearer {payload['token']}"}
+        me_response = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(me_response.status_code, 200)
+        self.assertEqual(me_response.get_json()["user"]["username"], "admin")
+
+        logout_response = self.client.post("/api/auth/logout", headers=headers)
+        self.assertEqual(logout_response.status_code, 200)
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).status_code, 401)
+
+    def test_auth_register_creates_user(self):
+        response = self.client.post(
+            "/api/auth/register",
+            json={"username": "school01", "password": "12345678"},
+        )
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(payload["user"]["username"], "school01")
+        self.assertTrue(payload["token"])
+
+    def test_analyze_requires_login(self):
+        response = self.client.post("/api/analyze", data={})
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("Войдите", payload["error"])
 
     def test_analyze_accepts_multipart_image_and_returns_report(self):
         response = self.client.post(
@@ -83,6 +129,7 @@ class ApiServerTests(unittest.TestCase):
                 "image": (io.BytesIO(jpeg_bytes()), "student.jpg"),
             },
             content_type="multipart/form-data",
+            headers=self.auth_headers,
         )
         payload = response.get_json()
 
@@ -100,6 +147,15 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(payload["care_plan"][0]["level"], "urgent")
         self.assertTrue(payload["overlay_image"].startswith("data:image/jpeg;base64,"))
 
+        stored = self.storage.get_report(self.admin["id"], payload["report_id"])
+        self.assertIsNotNone(stored)
+        self.assertIn("single", stored["images"])
+        self.assertNotIn("overlay_image", stored["report"])
+
+        restored_response = self.client.get(f"/api/reports/{payload['report_id']}", headers=self.auth_headers)
+        self.assertEqual(restored_response.status_code, 200)
+        self.assertTrue(restored_response.get_json()["overlay_image"].startswith("data:image/jpeg;base64,"))
+
     def test_analyze_accepts_five_view_protocol(self):
         response = self.client.post(
             "/api/analyze",
@@ -112,6 +168,7 @@ class ApiServerTests(unittest.TestCase):
                 "image_adams": (io.BytesIO(jpeg_bytes()), "adams.jpg"),
             },
             content_type="multipart/form-data",
+            headers=self.auth_headers,
         )
         payload = response.get_json()
 
@@ -149,8 +206,15 @@ class ApiServerTests(unittest.TestCase):
         self.assertTrue(all(view["risk"]["total_metrics"] == 0 for view in side_views))
         self.assertTrue(all(view["risk"]["score"] == 0 for view in side_views))
 
+        stored = self.storage.get_report(self.admin["id"], payload["report_id"])
+        self.assertEqual(set(stored["images"]), {"front", "back", "left", "right", "adams"})
+
+        reports_response = self.client.get("/api/reports", headers=self.auth_headers)
+        self.assertEqual(reports_response.status_code, 200)
+        self.assertTrue(any(item["report_id"] == payload["report_id"] for item in reports_response.get_json()["reports"]))
+
     def test_analyze_rejects_empty_request(self):
-        response = self.client.post("/api/analyze", data={})
+        response = self.client.post("/api/analyze", data={}, headers=self.auth_headers)
         payload = response.get_json()
 
         self.assertEqual(response.status_code, 400)

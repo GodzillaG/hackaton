@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 const ANALYZE_ENDPOINT = "/api/analyze";
 const HEALTH_ENDPOINT = "/api/health";
+const AUTH_TOKEN_KEY = "scolioscan_session_token";
+const REPORTS_ENDPOINT = "/api/reports";
 const MAX_UPLOAD_SIDE = 1600;
 
 const VIEW_STEPS = [
@@ -102,6 +104,13 @@ function formatEngine(value) {
   return "Анализ";
 }
 
+function formatRiskLevel(value) {
+  if (value === "high") return "Высокий";
+  if (value === "moderate") return "Средний";
+  if (value === "low") return "Низкий";
+  return "Повтор";
+}
+
 function makeFile(blob, fileName) {
   if (typeof File === "function") {
     return new File([blob], fileName, { type: blob.type || "image/jpeg" });
@@ -161,6 +170,15 @@ async function prepareImageFile(sourceFile) {
 
 export default function Home() {
   const [apiStatus, setApiStatus] = useState("checking");
+  const [authStatus, setAuthStatus] = useState("checking");
+  const [authUser, setAuthUser] = useState(null);
+  const [authToken, setAuthToken] = useState("");
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState({ username: "admin", password: "12345678" });
+  const [authError, setAuthError] = useState("");
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [reports, setReports] = useState([]);
+  const [isReportsLoading, setIsReportsLoading] = useState(false);
   const [studentId, setStudentId] = useState("");
   const [captures, setCaptures] = useState(createEmptyCaptureMap);
   const [previewUrls, setPreviewUrls] = useState({});
@@ -174,6 +192,44 @@ export default function Home() {
   const completedCount = VIEW_STEPS.filter((step) => captures[step.key]).length;
   const isProtocolReady = completedCount === VIEW_STEPS.length;
   const activePreviewUrl = previewUrls[activeStep.key] || "";
+
+  useEffect(() => {
+    const savedToken = window.localStorage.getItem(AUTH_TOKEN_KEY);
+    if (!savedToken) {
+      setAuthStatus("guest");
+      return;
+    }
+
+    let isActive = true;
+
+    async function restoreSession() {
+      try {
+        const response = await fetch("/api/auth/me", {
+          headers: { Authorization: `Bearer ${savedToken}` }
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Сессия истекла.");
+        if (!isActive) return;
+        setAuthToken(savedToken);
+        setAuthUser(payload.user);
+        setAuthStatus("authenticated");
+        await loadReports(savedToken);
+      } catch {
+        window.localStorage.removeItem(AUTH_TOKEN_KEY);
+        if (isActive) {
+          setAuthStatus("guest");
+          setAuthToken("");
+          setAuthUser(null);
+        }
+      }
+    }
+
+    restoreSession();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -226,6 +282,98 @@ export default function Home() {
       previewUrlsRef.current = nextUrls;
       return nextUrls;
     });
+  }
+
+  function authHeaders(token = authToken) {
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  function clearSession() {
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    setAuthStatus("guest");
+    setAuthToken("");
+    setAuthUser(null);
+    setReports([]);
+    setResult(null);
+  }
+
+  async function loadReports(token = authToken) {
+    if (!token) return;
+    setIsReportsLoading(true);
+    try {
+      const response = await fetch(REPORTS_ENDPOINT, {
+        headers: authHeaders(token)
+      });
+      const payload = await response.json().catch(() => ({ reports: [] }));
+      if (response.status === 401) {
+        clearSession();
+        return;
+      }
+      if (response.ok) setReports(payload.reports || []);
+    } finally {
+      setIsReportsLoading(false);
+    }
+  }
+
+  async function submitAuth(event) {
+    event.preventDefault();
+    setIsAuthLoading(true);
+    setAuthError("");
+
+    try {
+      const response = await fetch(`/api/auth/${authMode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(authForm)
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Не удалось войти.");
+
+      window.localStorage.setItem(AUTH_TOKEN_KEY, payload.token);
+      setAuthToken(payload.token);
+      setAuthUser(payload.user);
+      setAuthStatus("authenticated");
+      await loadReports(payload.token);
+    } catch (loginError) {
+      setAuthError(loginError.message || "Не удалось войти.");
+    } finally {
+      setIsAuthLoading(false);
+    }
+  }
+
+  async function logoutUser() {
+    if (authToken) {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: authHeaders()
+      }).catch(() => {});
+    }
+    clearSession();
+    resetScan();
+  }
+
+  async function openReport(reportId) {
+    setError("");
+    setIsReportsLoading(true);
+
+    try {
+      const response = await fetch(`${REPORTS_ENDPOINT}/${encodeURIComponent(reportId)}`, {
+        headers: authHeaders()
+      });
+      const payload = await response.json().catch(() => ({
+        error: "Сервер вернул некорректный отчёт."
+      }));
+      if (response.status === 401) {
+        clearSession();
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error || "Не удалось открыть отчёт.");
+      setResult(payload);
+    } catch (reportError) {
+      setError(reportError.message || "Не удалось открыть отчёт.");
+    } finally {
+      setIsReportsLoading(false);
+    }
   }
 
   function setProtocolFiles(nextCaptures, nextStudentId = studentId) {
@@ -317,8 +465,13 @@ export default function Home() {
     setResult(null);
 
     try {
+      if (!authToken) {
+        throw new Error("Войдите в аккаунт.");
+      }
+
       const response = await fetch(ANALYZE_ENDPOINT, {
         method: "POST",
+        headers: authHeaders(),
         body: formData
       });
       const payload = await response.json().catch(() => ({
@@ -327,11 +480,13 @@ export default function Home() {
 
       if (!response.ok) {
         if (response.status === 503) setApiStatus("offline");
+        if (response.status === 401) clearSession();
         throw new Error(payload.error || "Сервер анализа вернул ошибку.");
       }
 
       setApiStatus("online");
       setResult(payload);
+      await loadReports(authToken);
     } catch (requestError) {
       setError(requestError.message || "Не удалось отправить протокол.");
     } finally {
@@ -367,6 +522,36 @@ export default function Home() {
     URL.revokeObjectURL(url);
   }
 
+  if (authStatus !== "authenticated") {
+    return (
+      <main className="appShell">
+        <header className="topbar">
+          <div className="brand">
+            <div className="brandMark">S</div>
+            <div>
+              <p className="eyebrow">Скрининг осанки</p>
+              <h1>ScolioScan School</h1>
+            </div>
+          </div>
+          <div className={`statusPill ${apiStatus}`}>
+            <span />
+            {apiStatus === "online" ? "Готов" : apiStatus === "offline" ? "Нет связи" : "Проверка"}
+          </div>
+        </header>
+        <AuthScreen
+          authError={authError}
+          authForm={authForm}
+          authMode={authMode}
+          authStatus={authStatus}
+          isAuthLoading={isAuthLoading}
+          onChange={setAuthForm}
+          onModeChange={setAuthMode}
+          onSubmit={submitAuth}
+        />
+      </main>
+    );
+  }
+
   return (
     <main className="appShell">
       <header className="topbar">
@@ -377,9 +562,15 @@ export default function Home() {
             <h1>ScolioScan School</h1>
           </div>
         </div>
-        <div className={`statusPill ${apiStatus}`}>
-          <span />
-          {apiStatus === "online" ? "Готов" : apiStatus === "offline" ? "Нет связи" : "Проверка"}
+        <div className="topbarActions">
+          <div className={`statusPill ${apiStatus}`}>
+            <span />
+            {apiStatus === "online" ? "Готов" : apiStatus === "offline" ? "Нет связи" : "Проверка"}
+          </div>
+          <div className="userPill">{authUser?.username}</div>
+          <button className="ghostButton" type="button" onClick={logoutUser}>
+            Выйти
+          </button>
         </div>
       </header>
 
@@ -450,6 +641,8 @@ export default function Home() {
             </div>
           </div>
 
+          <ReportHistory reports={reports} isLoading={isReportsLoading} onOpen={openReport} />
+
           <div className="activeViewHeader">
             <div>
               <p className="eyebrow">{activeStep.label}</p>
@@ -514,6 +707,79 @@ export default function Home() {
   );
 }
 
+function AuthScreen({
+  authError,
+  authForm,
+  authMode,
+  authStatus,
+  isAuthLoading,
+  onChange,
+  onModeChange,
+  onSubmit
+}) {
+  const isRegister = authMode === "register";
+
+  return (
+    <section className="authShell">
+      <form className="panel authPanel" onSubmit={onSubmit}>
+        <div className="panelHeader">
+          <div>
+            <p className="eyebrow">Аккаунт</p>
+            <h2>{isRegister ? "Регистрация" : "Вход"}</h2>
+          </div>
+          <div className="authModeSwitch">
+            <button
+              className={authMode === "login" ? "active" : ""}
+              type="button"
+              onClick={() => onModeChange("login")}
+            >
+              Вход
+            </button>
+            <button
+              className={authMode === "register" ? "active" : ""}
+              type="button"
+              onClick={() => onModeChange("register")}
+            >
+              Новый
+            </button>
+          </div>
+        </div>
+
+        <label className="fieldLabel" htmlFor="authUsername">
+          Логин
+        </label>
+        <input
+          id="authUsername"
+          className="textInput"
+          autoComplete="username"
+          value={authForm.username}
+          onChange={(event) => onChange((current) => ({ ...current, username: event.target.value }))}
+          placeholder="admin"
+        />
+
+        <label className="fieldLabel" htmlFor="authPassword">
+          Пароль
+        </label>
+        <input
+          id="authPassword"
+          className="textInput"
+          autoComplete={isRegister ? "new-password" : "current-password"}
+          type="password"
+          value={authForm.password}
+          onChange={(event) => onChange((current) => ({ ...current, password: event.target.value }))}
+          placeholder="12345678"
+        />
+
+        {authError ? <div className="errorBox">{authError}</div> : null}
+
+        <button className="primaryButton authSubmit" type="submit" disabled={isAuthLoading || authStatus === "checking"}>
+          {isAuthLoading ? "Проверка..." : isRegister ? "Создать аккаунт" : "Войти"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
 function EmptyResult() {
   return (
     <div className="emptyResult">
@@ -524,6 +790,32 @@ function EmptyResult() {
       <h2>Нет активного отчёта</h2>
       <p>Готов к протоколу из пяти ракурсов.</p>
     </div>
+  );
+}
+
+function ReportHistory({ reports, isLoading, onOpen }) {
+  return (
+    <section className="historyBlock">
+      <div className="sampleHeader">
+        <span>История</span>
+        <small>{isLoading ? "обновление" : `${reports.length}`}</small>
+      </div>
+      {reports.length ? (
+        <div className="reportList">
+          {reports.slice(0, 6).map((report) => (
+            <button className="reportButton" key={report.report_id} type="button" onClick={() => onOpen(report.report_id)}>
+              <div>
+                <strong>{report.student_id}</strong>
+                <span>{formatTimestamp(report.created_at)}</span>
+              </div>
+              <em className={`riskText riskText-${report.risk_level}`}>{formatRiskLevel(report.risk_level)}</em>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="historyEmpty">Нет сохранённых отчётов</p>
+      )}
+    </section>
   );
 }
 
