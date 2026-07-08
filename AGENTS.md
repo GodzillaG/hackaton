@@ -19,7 +19,7 @@ The default screening flow is Basic analysis with one front photo. Advanced anal
 
 Reports, overlay images, users, password hashes, session tokens, and Advanced subscription entitlements are stored in SQLite at `data/scolioscan.db` by default. Do not reintroduce filesystem report persistence as the primary storage path. The root `reports/` folder is legacy runtime output only and may be used as a migration source.
 
-Advanced pricing is currently represented as local demo billing: individual one-time `$10`, individual monthly `$25`, and corporate monthly `$99`. The backend must enforce Advanced access; do not rely only on hiding buttons in the UI.
+Advanced pricing is currently represented as local demo billing: individual one-time `$10`, individual monthly `$25`, individual annual `$199`, corporate school monthly `$99`, corporate school annual `$999`, and corporate network monthly `$249`. The backend must enforce Advanced access; do not rely only on hiding buttons in the UI.
 
 The default local account is `admin` with password `12345678`. Passwords must be stored as hashes, not plaintext.
 

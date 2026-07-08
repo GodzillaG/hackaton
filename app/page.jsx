@@ -1112,6 +1112,13 @@ function PlanCard({ isLoading, onActivate, plan }) {
         <span>{plan.audience_label}</span>
         <h4>{plan.name}</h4>
         <p>{plan.description}</p>
+        {Array.isArray(plan.features) && plan.features.length ? (
+          <ul className="planFeatures">
+            {plan.features.map((feature) => (
+              <li key={feature}>{feature}</li>
+            ))}
+          </ul>
+        ) : null}
       </div>
       <div className="planCardBottom">
         <strong>{formatPlanPrice(plan)}</strong>
@@ -1124,7 +1131,7 @@ function PlanCard({ isLoading, onActivate, plan }) {
 }
 
 function formatPlanPrice(plan) {
-  const suffix = plan.period === "month" ? "/мес" : "";
+  const suffix = plan.period === "month" ? "/мес" : plan.period === "year" ? "/год" : "";
   return `$${plan.price_usd}${suffix}`;
 }
 

@@ -122,6 +122,9 @@ class ApiServerTests(unittest.TestCase):
         plans_payload = plans_response.get_json()
         self.assertEqual(plans_response.status_code, 200)
         self.assertTrue(any(plan["id"] == "individual_one_time" for plan in plans_payload["plans"]))
+        self.assertTrue(any(plan["id"] == "individual_annual" for plan in plans_payload["plans"]))
+        self.assertTrue(any(plan["id"] == "corporate_annual" for plan in plans_payload["plans"]))
+        self.assertTrue(any(plan["id"] == "corporate_network_monthly" for plan in plans_payload["plans"]))
 
         status_response = self.client.get("/api/billing/status", headers=self.auth_headers)
         self.assertEqual(status_response.status_code, 200)

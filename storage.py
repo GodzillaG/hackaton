@@ -24,8 +24,10 @@ PLAN_CATALOG = [
         "billing_label": "разовый доступ",
         "price_usd": 10,
         "period": "once",
+        "duration_days": None,
         "advanced_enabled": True,
         "description": "Пять ракурсов для разовой расширенной проверки.",
+        "features": ["Однократная оплата", "Отчёт с разметкой", "История результата"],
     },
     {
         "id": "individual_monthly",
@@ -36,20 +38,66 @@ PLAN_CATALOG = [
         "billing_label": "ежемесячно",
         "price_usd": 25,
         "period": "month",
+        "duration_days": 30,
         "advanced_enabled": True,
         "description": "Неограниченный Advanced-анализ для личного аккаунта.",
+        "features": ["Advanced без лимита", "История отчётов", "Подходит для семьи"],
+    },
+    {
+        "id": "individual_annual",
+        "name": "Advanced год",
+        "audience": "individual",
+        "audience_label": "Индивидуальный",
+        "billing": "annual",
+        "billing_label": "ежегодно",
+        "price_usd": 199,
+        "period": "year",
+        "duration_days": 365,
+        "advanced_enabled": True,
+        "description": "Годовой доступ к Advanced-анализу с выгодой по сравнению с оплатой помесячно.",
+        "features": ["12 месяцев доступа", "Экономия против месячного", "История динамики"],
     },
     {
         "id": "corporate_monthly",
-        "name": "School Advanced",
+        "name": "School Advanced месяц",
         "audience": "corporate",
         "audience_label": "Корпоративный",
         "billing": "monthly",
         "billing_label": "ежемесячно",
         "price_usd": 99,
         "period": "month",
+        "duration_days": 30,
         "advanced_enabled": True,
         "description": "Расширенный протокол для школ, классов и медкабинетов.",
+        "features": ["Классы и медкабинет", "Локальная история", "Ежемесячная оплата"],
+    },
+    {
+        "id": "corporate_annual",
+        "name": "School Advanced год",
+        "audience": "corporate",
+        "audience_label": "Корпоративный",
+        "billing": "annual",
+        "billing_label": "ежегодно",
+        "price_usd": 999,
+        "period": "year",
+        "duration_days": 365,
+        "advanced_enabled": True,
+        "description": "Годовой тариф для одной школы с постоянным доступом к Advanced-протоколу.",
+        "features": ["Годовой школьный доступ", "Профосмотры по графику", "Архив отчётов"],
+    },
+    {
+        "id": "corporate_network_monthly",
+        "name": "District Advanced",
+        "audience": "corporate",
+        "audience_label": "Корпоративный",
+        "billing": "monthly",
+        "billing_label": "ежемесячно",
+        "price_usd": 249,
+        "period": "month",
+        "duration_days": 30,
+        "advanced_enabled": True,
+        "description": "Тариф для сети школ, районного проекта или нескольких медкабинетов.",
+        "features": ["Несколько школ", "Массовый скрининг", "Единый цифровой архив"],
     },
 ]
 PLAN_BY_ID = {plan["id"]: plan for plan in PLAN_CATALOG}
@@ -305,7 +353,8 @@ class ScolioScanStorage:
             raise ValueError("Тариф не найден.")
 
         now = datetime.now(timezone.utc)
-        expires_at = (now + timedelta(days=30)).isoformat() if plan["billing"] == "monthly" else None
+        duration_days = plan.get("duration_days")
+        expires_at = (now + timedelta(days=int(duration_days))).isoformat() if duration_days else None
         organization = organization_name.strip()[:120] or None
 
         with self.connect() as connection:

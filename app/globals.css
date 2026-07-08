@@ -476,6 +476,34 @@ h4 {
   line-height: 1.4;
 }
 
+.planFeatures {
+  display: grid;
+  gap: 4px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planFeatures li {
+  position: relative;
+  padding-left: 14px;
+  color: #344054;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.planFeatures li::before {
+  position: absolute;
+  top: 0.55em;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  content: "";
+}
+
 .planCardBottom {
   display: flex;
   align-items: center;

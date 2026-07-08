@@ -37,6 +37,19 @@ class StorageTests(unittest.TestCase):
             self.assertEqual(status["subscription"]["price_usd"], 25)
             self.assertEqual(status["subscription"]["audience"], "individual")
 
+    def test_annual_subscription_gets_expiration_date(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage = ScolioScanStorage(Path(temp_dir) / "scolioscan.db")
+            storage.initialize(migrate_reports=False)
+            admin = storage.authenticate_user("admin", "12345678")
+
+            subscription = storage.activate_plan(admin["id"], "corporate_annual", "School 42")
+
+            self.assertEqual(subscription["plan_id"], "corporate_annual")
+            self.assertEqual(subscription["organization_name"], "School 42")
+            self.assertIsNotNone(subscription["expires_at"])
+            self.assertEqual(subscription["billing"], "annual")
+
     def test_migrates_legacy_reports_under_admin(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
