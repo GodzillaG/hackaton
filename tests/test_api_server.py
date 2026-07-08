@@ -96,6 +96,8 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(payload["risk"]["finding_count"], 3)
         self.assertEqual(len(payload["metric_cards"]), 5)
         self.assertEqual(len(payload["recommendations"]), 3)
+        self.assertEqual(len(payload["care_plan"]), 4)
+        self.assertEqual(payload["care_plan"][0]["level"], "urgent")
         self.assertTrue(payload["overlay_image"].startswith("data:image/jpeg;base64,"))
 
     def test_analyze_accepts_five_view_protocol(self):
@@ -134,6 +136,8 @@ class ApiServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(len(payload["metric_cards"]), 5)
+        self.assertEqual(len(payload["care_plan"]), 4)
+        self.assertTrue(any(item["title"] == "Ортопед приоритетно" for item in payload["care_plan"]))
         self.assertTrue(payload["overlay_image"].startswith("data:image/jpeg;base64,"))
         self.assertEqual(
             [view["view_key"] for view in payload["views"]],
@@ -154,6 +158,19 @@ class ApiServerTests(unittest.TestCase):
             api_server._report_id("7 B/014", timestamp),
             "7_B_014_20260708_093004",
         )
+
+    def test_care_plan_handles_zero_risk(self):
+        plan = api_server._care_plan("low", 0, True)
+
+        self.assertEqual(plan[0]["level"], "ok")
+        self.assertEqual(plan[0]["title"], "Плановый контроль")
+        self.assertTrue(any("Обычная активность" == item["title"] for item in plan))
+
+    def test_care_plan_handles_missing_landmarks(self):
+        plan = api_server._care_plan("unknown", 0, False)
+
+        self.assertEqual(plan[0]["level"], "neutral")
+        self.assertEqual(plan[0]["title"], "Переснять протокол")
 
 
 if __name__ == "__main__":

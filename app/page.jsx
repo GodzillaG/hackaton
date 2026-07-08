@@ -567,7 +567,7 @@ function ResultView({ result, onDownload }) {
 
         <div className="recommendationBlock">
           <div className="sectionHeader">
-            <h3>Действия</h3>
+            <h3>Кратко</h3>
             <button className="ghostButton" type="button" onClick={onDownload}>
               Скачать
             </button>
@@ -579,6 +579,10 @@ function ResultView({ result, onDownload }) {
           </ol>
         </div>
       </div>
+
+      {Array.isArray(result.care_plan) && result.care_plan.length > 0 ? (
+        <CarePlan plan={result.care_plan} />
+      ) : null}
 
       {isMultiView ? (
         <div className="viewResultGrid">
@@ -594,6 +598,39 @@ function ResultView({ result, onDownload }) {
       ) : null}
     </div>
   );
+}
+
+function CarePlan({ plan }) {
+  return (
+    <section className="carePlanBlock">
+      <div className="sectionHeader">
+        <h3>План действий</h3>
+        <span>{formatStepCount(plan.length)}</span>
+      </div>
+      <div className="carePlanGrid">
+        {plan.map((item) => (
+          <article className={`carePlanItem ${item.level || "neutral"}`} key={`${item.title}-${item.body}`}>
+            <span>{formatCarePlanLevel(item.level)}</span>
+            <h4>{item.title}</h4>
+            <p>{item.body}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function formatCarePlanLevel(level) {
+  if (level === "urgent") return "Приоритет";
+  if (level === "attention") return "Контроль";
+  if (level === "ok") return "Ок";
+  return "Повтор";
+}
+
+function formatStepCount(count) {
+  if (count % 10 === 1 && count % 100 !== 11) return `${count} шаг`;
+  if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) return `${count} шага`;
+  return `${count} шагов`;
 }
 
 function SummaryTile({ label, value, compact = false }) {

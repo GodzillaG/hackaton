@@ -275,6 +275,7 @@ def _build_response(student_id: str, screening, annotated: np.ndarray) -> dict[s
         "flags": view_payload["flags"],
         "metric_cards": view_payload["metric_cards"],
         "recommendations": _recommendations(screening.risk_level, screening.landmarks_found),
+        "care_plan": _care_plan(screening.risk_level, view_payload["risk"]["score"], screening.landmarks_found),
         "message": view_payload["message"],
         "overlay_image": view_payload["overlay_image"],
     }
@@ -347,6 +348,7 @@ def _build_multi_view_response(student_id: str, views: list[dict[str, Any]]) -> 
         "flags": _aggregate_flags(views),
         "metric_cards": metric_cards,
         "recommendations": _recommendations(risk_level, found_count > 0),
+        "care_plan": _care_plan(risk_level, score, found_count > 0),
         "message": f"Проанализировано ракурсов: {found_count}/{len(views)}.",
         "overlay_image": primary_view["overlay_image"],
         "views": views,
@@ -419,16 +421,16 @@ def _metric_cards(screening) -> list[dict[str, Any]]:
 def _recommendations(risk_level: str, landmarks_found: bool) -> list[str]:
     if not landmarks_found:
         return [
-            "Переснять фото в полный рост при ровном освещении.",
+            "Повторить протокол съёмки при ровном освещении.",
             "Поставить камеру на уровне середины корпуса, без наклона.",
-            "Попросить школьника стоять прямо, руки свободно вдоль тела.",
+            "Проверить, что все пять ракурсов видны полностью.",
         ]
 
     if risk_level == "low":
         return [
             "Зафиксировать результат в журнале профилактического осмотра.",
             "Повторить скрининг по плановому графику.",
-            "Следить за симметричной посадкой и нагрузкой рюкзака.",
+            "Поддерживать обычную физическую активность и симметричную нагрузку.",
         ]
 
     if risk_level == "moderate":
@@ -446,6 +448,106 @@ def _recommendations(risk_level: str, landmarks_found: bool) -> list[str]:
         ]
 
     return ["Повторить скрининг с новым снимком."]
+
+
+def _care_plan(risk_level: str, score: int, landmarks_found: bool) -> list[dict[str, str]]:
+    if not landmarks_found:
+        return [
+            {
+                "title": "Переснять протокол",
+                "body": "Повторить пять ракурсов: спереди, со спины, левый бок, правый бок и тест Адамса.",
+                "level": "neutral",
+            },
+            {
+                "title": "Проверить качество кадра",
+                "body": "Полный рост, ровная камера, контрастный фон, плечи, таз и спина без перекрытия одеждой.",
+                "level": "neutral",
+            },
+        ]
+
+    if risk_level == "low" and score == 0:
+        return [
+            {
+                "title": "Плановый контроль",
+                "body": "Признаки риска не обнаружены. Достаточно сохранить результат и повторить скрининг по школьному графику.",
+                "level": "ok",
+            },
+            {
+                "title": "Обычная активность",
+                "body": "Можно продолжать физкультуру и спорт с нормальной техникой, без специальных ограничений по этому скринингу.",
+                "level": "ok",
+            },
+            {
+                "title": "Профилактика нагрузки",
+                "body": "Следить за симметричной посадкой, рюкзаком на двух лямках и регулярной общей физической активностью.",
+                "level": "ok",
+            },
+        ]
+
+    if risk_level == "low":
+        return [
+            {
+                "title": "Наблюдение",
+                "body": "Критичных признаков нет, но отдельные небольшие отклонения стоит сравнить с будущими скринингами.",
+                "level": "ok",
+            },
+            {
+                "title": "Повтор по графику",
+                "body": "Сохранить отчёт и повторить скрининг в плановый срок или раньше при видимом ухудшении осанки.",
+                "level": "ok",
+            },
+        ]
+
+    if risk_level == "moderate":
+        return [
+            {
+                "title": "Подтверждение результата",
+                "body": "Повторить протокол в тот же день или на ближайшем контрольном осмотре, чтобы исключить ошибку позы и кадра.",
+                "level": "attention",
+            },
+            {
+                "title": "Очный школьный осмотр",
+                "body": "Провести тест Адамса и измерение ATR сколиометром; при повторном среднем риске направить к ортопеду.",
+                "level": "attention",
+            },
+            {
+                "title": "ЛФК и тренировки",
+                "body": "До очной оценки избегать тяжёлой осевой нагрузки; использовать симметричную ОФП, упражнения на контроль корпуса и дыхание.",
+                "level": "attention",
+            },
+        ]
+
+    if risk_level == "high":
+        return [
+            {
+                "title": "Ортопед приоритетно",
+                "body": "Передать отчёт специалисту и провести очную оценку: тест Адамса, ATR сколиометром, оценка роста и риска прогрессии.",
+                "level": "urgent",
+            },
+            {
+                "title": "Подтверждение степени",
+                "body": "При показаниях специалист назначает рентген и измерение угла Cobb; от угла и роста зависит наблюдение, ЛФК, корсет или хирургическая оценка.",
+                "level": "urgent",
+            },
+            {
+                "title": "Без самолечения нагрузкой",
+                "body": "Зал и турник не заменяют лечение. До плана ортопеда не начинать тяжёлые приседы, становую, жимы стоя и асимметричные нагрузки.",
+                "level": "urgent",
+            },
+            {
+                "title": "Рабочий план",
+                "body": "После подтверждения обычно выбирают наблюдение, специальные антисколиотические упражнения/ЛФК, корсет при прогрессирующих дугах у растущих детей или направление на хирургическую оценку при больших дугах.",
+                "level": "urgent",
+            },
+        ]
+
+    return [
+        {
+            "title": "Повторить скрининг",
+            "body": "Сделать новый протокол и сравнить результат с текущим отчётом.",
+            "level": "neutral",
+        }
+    ]
 
 
 def _encode_jpeg_data_url(image: np.ndarray) -> str:
