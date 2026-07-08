@@ -137,7 +137,8 @@ def _angle_from_horizontal(p_left, p_right) -> float:
     dy = p_right[1] - p_left[1]
     if dx == 0:
         return 90.0
-    return math.degrees(math.atan2(dy, dx))
+    angle = abs(math.degrees(math.atan2(dy, dx))) % 180.0
+    return min(angle, 180.0 - angle)
 
 
 def _midpoint(a, b) -> tuple[float, float]:
