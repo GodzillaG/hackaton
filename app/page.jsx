@@ -666,14 +666,16 @@ function MetricRow({ metric }) {
 }
 
 function ViewResultCard({ view }) {
+  const isProfileView = view.view_role === "profile";
+
   return (
     <article className={`viewResultCard risk-${view.risk?.accent || "gray"}`}>
       <div className="viewResultTop">
         <div>
           <h4>{view.view_label}</h4>
-          <span>{view.risk.label}</span>
+          <span>{isProfileView ? "Профильный контроль" : view.risk.label}</span>
         </div>
-        <strong>{view.risk.score}%</strong>
+        <strong>{isProfileView ? "—" : `${view.risk.score}%`}</strong>
       </div>
       {view.overlay_image ? <img src={view.overlay_image} alt={`Разметка: ${view.view_label}`} /> : null}
       <div className="viewResultMeta">

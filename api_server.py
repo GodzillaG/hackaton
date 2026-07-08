@@ -15,6 +15,7 @@ import base64
 import json
 import os
 import re
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,7 @@ VIEW_DEFS = [
     {"key": "adams", "field": "image_adams", "label": "Тест Адамса"},
 ]
 RISK_RANK = {"unknown": 0, "low": 1, "moderate": 2, "high": 3}
+SIDE_VIEW_KEYS = {"left", "right"}
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
@@ -178,6 +180,7 @@ def analyze():
     for item in frames:
         frame = _resize_for_analysis(item["frame"])
         screening, mp_results = current_analyzer.analyze_frame(frame)
+        screening = _screening_for_view(screening, item["key"])
         annotated = current_analyzer.draw_overlay(frame, mp_results, screening)
         view_results.append(_build_view_response(item, screening, annotated))
         annotated_views[item["key"]] = annotated
@@ -282,15 +285,18 @@ def _build_response(student_id: str, screening, annotated: np.ndarray) -> dict[s
 
 
 def _build_view_response(view: dict[str, Any], screening, annotated: np.ndarray) -> dict[str, Any]:
-    metrics = _metric_cards(screening)
+    view_key = view["key"]
+    metrics = _metric_cards(screening, view_key)
     finding_count = sum(1 for metric in metrics if metric["triggered"])
     total_metrics = len(metrics)
     profile = RISK_PROFILE.get(screening.risk_level, RISK_PROFILE["unknown"])
-    score = int(round((finding_count / total_metrics) * 100)) if screening.landmarks_found else 0
+    score = int(round((finding_count / total_metrics) * 100)) if screening.landmarks_found and total_metrics else 0
 
     return {
-        "view_key": view["key"],
+        "view_key": view_key,
         "view_label": view["label"],
+        "view_role": "profile" if _is_side_view(view_key) else "screening",
+        "metrics_applicable": total_metrics > 0,
         "landmarks_found": screening.landmarks_found,
         "analysis_engine": screening.analysis_engine,
         "quality_score": round(screening.quality_score, 2),
@@ -391,7 +397,31 @@ def _aggregate_flags(views: list[dict[str, Any]]) -> dict[str, bool]:
     }
 
 
-def _metric_cards(screening) -> list[dict[str, Any]]:
+def _is_side_view(view_key: str) -> bool:
+    return view_key in SIDE_VIEW_KEYS
+
+
+def _screening_for_view(screening, view_key: str):
+    if not _is_side_view(view_key) or not screening.landmarks_found:
+        return screening
+
+    return replace(
+        screening,
+        shoulder_tilt_deg=0.0,
+        hip_tilt_deg=0.0,
+        head_tilt_deg=0.0,
+        trunk_shift_ratio=0.0,
+        waist_asym_ratio=0.0,
+        flags={item["flag"]: False for item in METRIC_DEFS},
+        risk_level="low",
+        message="Профильный ракурс используется для контроля протокола; фронтальные метрики асимметрии к нему не применяются.",
+    )
+
+
+def _metric_cards(screening, view_key: str = "single") -> list[dict[str, Any]]:
+    if _is_side_view(view_key):
+        return []
+
     raw = screening.to_dict()["metrics"]
     cards = []
 

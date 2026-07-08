@@ -122,8 +122,8 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(payload["views_completed"], 5)
         self.assertEqual(len(payload["views"]), 5)
         self.assertEqual(payload["risk"]["level"], "high")
-        self.assertEqual(payload["risk"]["finding_count"], 15)
-        self.assertEqual(payload["risk"]["total_metrics"], 25)
+        self.assertEqual(payload["risk"]["finding_count"], 9)
+        self.assertEqual(payload["risk"]["total_metrics"], 15)
         self.assertEqual(payload["risk"]["score"], 60)
         self.assertEqual(
             payload["flags"],
@@ -143,6 +143,11 @@ class ApiServerTests(unittest.TestCase):
             [view["view_key"] for view in payload["views"]],
             ["front", "back", "left", "right", "adams"],
         )
+        side_views = [view for view in payload["views"] if view["view_key"] in {"left", "right"}]
+        self.assertEqual(len(side_views), 2)
+        self.assertTrue(all(view["view_role"] == "profile" for view in side_views))
+        self.assertTrue(all(view["risk"]["total_metrics"] == 0 for view in side_views))
+        self.assertTrue(all(view["risk"]["score"] == 0 for view in side_views))
 
     def test_analyze_rejects_empty_request(self):
         response = self.client.post("/api/analyze", data={})
@@ -171,6 +176,43 @@ class ApiServerTests(unittest.TestCase):
 
         self.assertEqual(plan[0]["level"], "neutral")
         self.assertEqual(plan[0]["title"], "Переснять протокол")
+
+    def test_side_view_excludes_frontal_tilt_metrics(self):
+        screening = ScreeningResult(
+            landmarks_found=True,
+            shoulder_tilt_deg=84.0,
+            hip_tilt_deg=76.0,
+            head_tilt_deg=42.0,
+            trunk_shift_ratio=0.4,
+            waist_asym_ratio=0.3,
+            flags={
+                "shoulder_tilt": True,
+                "hip_tilt": True,
+                "head_tilt": True,
+                "trunk_shift": True,
+                "waist_asymmetry": True,
+            },
+            risk_level="high",
+            message="profile false positive",
+            analysis_engine="unit_test",
+            quality_score=0.88,
+        )
+
+        adjusted = api_server._screening_for_view(screening, "left")
+        payload = api_server._build_view_response(
+            {"key": "left", "label": "Левый бок"},
+            adjusted,
+            np.zeros((16, 16, 3), dtype=np.uint8),
+        )
+
+        self.assertEqual(payload["view_role"], "profile")
+        self.assertFalse(payload["metrics_applicable"])
+        self.assertEqual(payload["risk"]["level"], "low")
+        self.assertEqual(payload["risk"]["finding_count"], 0)
+        self.assertEqual(payload["risk"]["total_metrics"], 0)
+        self.assertEqual(payload["risk"]["score"], 0)
+        self.assertEqual(payload["metric_cards"], [])
+        self.assertTrue(all(not value for value in payload["flags"].values()))
 
 
 if __name__ == "__main__":
