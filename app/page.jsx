@@ -279,7 +279,7 @@ export default function Home() {
           <div className="brandMark">S</div>
           <div>
             <p className="eyebrow">Скрининг осанки</p>
-            <h1>ScoliScan School</h1>
+            <h1>ScolioScan School</h1>
           </div>
         </div>
         <div className={`statusPill ${apiStatus}`}>

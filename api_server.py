@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Flask backend for ScoliScan School.
+Flask backend for ScolioScan School.
 
 Run locally:
     uv run python api_server.py --host 0.0.0.0 --port 5000

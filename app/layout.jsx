@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "ScoliScan School",
+  title: "ScolioScan School",
   description: "Мобильный ИИ-комплекс для скрининга сколиоза у школьников"
 };
 

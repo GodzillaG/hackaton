@@ -2,7 +2,7 @@
 
 ## Project
 
-ScoliScan School is a hackathon prototype for mobile scoliosis risk screening in school settings.
+ScolioScan School is a hackathon prototype for mobile scoliosis risk screening in school settings.
 
 The working architecture is:
 
