@@ -28,7 +28,7 @@ class StorageTests(unittest.TestCase):
             admin = storage.authenticate_user("admin", "12345678")
 
             self.assertFalse(storage.has_advanced_access(admin["id"]))
-            self.assertEqual(storage.billing_status(admin["id"])["remaining"]["basic"], 10)
+            self.assertEqual(storage.billing_status(admin["id"])["remaining"]["basic"], 5)
 
             subscription = storage.activate_plan(admin["id"], "plus")
             status = storage.billing_status(admin["id"])
@@ -37,7 +37,7 @@ class StorageTests(unittest.TestCase):
             self.assertTrue(status["advanced_enabled"])
             self.assertEqual(status["subscription"]["price_usd"], 19)
             self.assertEqual(status["subscription"]["audience"], "individual")
-            self.assertEqual(status["remaining"], {"basic": 80, "advanced": 8})
+            self.assertEqual(status["remaining"], {"basic": 80, "advanced": 4})
 
     def test_corporate_student_verification_uses_school_resources(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -65,7 +65,35 @@ class StorageTests(unittest.TestCase):
             status = storage.billing_status(admin["id"])
 
             self.assertEqual(status["usage"]["basic"], 1)
-            self.assertEqual(status["remaining"]["basic"], 9)
+            self.assertEqual(status["remaining"]["basic"], 4)
+
+    def test_initialize_updates_legacy_plus_advanced_quota(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "scolioscan.db"
+            storage = ScolioScanStorage(db_path)
+            storage.initialize(migrate_reports=False)
+            admin = storage.authenticate_user("admin", "12345678")
+
+            with storage.connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO subscriptions (
+                        user_id, plan_id, audience, billing, price_usd,
+                        price_label, status, advanced_enabled, basic_quota,
+                        advanced_quota, organization_name, student_external_id,
+                        created_at, expires_at
+                    )
+                    VALUES (?, 'plus', 'individual', 'monthly', 19, '$19/мес',
+                            'active', 1, 80, 8, NULL, NULL, ?, NULL)
+                    """,
+                    (admin["id"], "2026-07-09T00:00:00+00:00"),
+                )
+
+            storage = ScolioScanStorage(db_path)
+            storage.initialize(migrate_reports=False)
+            status = storage.billing_status(admin["id"])
+
+            self.assertEqual(status["remaining"], {"basic": 80, "advanced": 4})
 
     def test_migrates_legacy_reports_under_admin(self):
         with tempfile.TemporaryDirectory() as temp_dir:

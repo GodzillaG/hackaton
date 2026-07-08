@@ -101,7 +101,7 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(me_payload["user"]["username"], "admin")
         self.assertFalse(me_payload["billing"]["advanced_enabled"])
         self.assertEqual(me_payload["billing"]["plan"]["id"], "free")
-        self.assertEqual(me_payload["billing"]["remaining"]["basic"], 10)
+        self.assertEqual(me_payload["billing"]["remaining"]["basic"], 5)
 
         logout_response = self.client.post("/api/auth/logout", headers=headers)
         self.assertEqual(logout_response.status_code, 200)
@@ -128,7 +128,7 @@ class ApiServerTests(unittest.TestCase):
         plus_plan = next(plan for plan in plans_payload["plans"] if plan["id"] == "plus")
         self.assertEqual(plus_plan["price_usd"], 19)
         self.assertEqual(plus_plan["basic_quota"], 80)
-        self.assertEqual(plus_plan["advanced_quota"], 8)
+        self.assertEqual(plus_plan["advanced_quota"], 4)
 
         status_response = self.client.get("/api/billing/status", headers=self.auth_headers)
         self.assertEqual(status_response.status_code, 200)
@@ -144,7 +144,7 @@ class ApiServerTests(unittest.TestCase):
         self.assertEqual(checkout_response.status_code, 200)
         self.assertTrue(checkout_payload["advanced_enabled"])
         self.assertEqual(checkout_payload["plan"]["id"], "plus")
-        self.assertEqual(checkout_payload["remaining"]["advanced"], 8)
+        self.assertEqual(checkout_payload["remaining"]["advanced"], 4)
 
     def test_verify_student_status_enables_corporate_resources(self):
         response = self.client.post(

@@ -13,8 +13,8 @@ const DEFAULT_BILLING_STATUS = {
   subscription: null,
   plan: { id: "free", name: "Free" },
   usage: { basic: 0, advanced: 0 },
-  limits: { basic: 10, advanced: 0 },
-  remaining: { basic: 10, advanced: 0 }
+  limits: { basic: 5, advanced: 0 },
+  remaining: { basic: 5, advanced: 0 }
 };
 
 const BASIC_CAPTURE_STEP = {

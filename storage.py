@@ -28,11 +28,11 @@ PLAN_CATALOG = [
         "price_label": "$0",
         "period": "month",
         "duration_days": None,
-        "basic_quota": 10,
+        "basic_quota": 5,
         "advanced_quota": 0,
         "advanced_enabled": False,
         "description": "Стартовый уровень для быстрых индивидуальных проверок.",
-        "features": ["10 Basic-анализов в месяц", "История отчётов", "Подходит для первичной проверки"],
+        "features": ["5 Basic-анализов в месяц", "История отчётов", "Подходит для первичной проверки"],
     },
     {
         "id": "plus",
@@ -46,10 +46,10 @@ PLAN_CATALOG = [
         "period": "month",
         "duration_days": 30,
         "basic_quota": 80,
-        "advanced_quota": 8,
+        "advanced_quota": 4,
         "advanced_enabled": True,
         "description": "Больше быстрых проверок и ежемесячный пакет Advanced-протоколов.",
-        "features": ["80 Basic-анализов в месяц", "8 Advanced-анализов в месяц", "Для семьи и регулярного контроля"],
+        "features": ["80 Basic-анализов в месяц", "4 Advanced-анализа в месяц", "Для семьи и регулярного контроля"],
     },
     {
         "id": "corporate",
@@ -256,6 +256,7 @@ class ScolioScanStorage:
         self._ensure_column(connection, "subscriptions", "advanced_quota", "INTEGER")
         self._ensure_column(connection, "subscriptions", "student_external_id", "TEXT")
         self._ensure_default_corporate_code(connection)
+        self._sync_plan_quota_defaults(connection)
 
     @staticmethod
     def _ensure_column(connection, table_name: str, column_name: str, definition: str) -> None:
@@ -287,6 +288,26 @@ class ScolioScanStorage:
                 int(corporate_plan["advanced_quota"]),
                 utc_now(),
             ),
+        )
+
+    def _sync_plan_quota_defaults(self, connection) -> None:
+        connection.execute(
+            """
+            UPDATE subscriptions
+            SET advanced_quota = ?
+            WHERE plan_id IN ('plus', 'individual_one_time', 'individual_monthly', 'individual_annual')
+              AND advanced_quota = 8
+            """,
+            (int(plan_by_id("plus")["advanced_quota"]),),
+        )
+        connection.execute(
+            """
+            UPDATE subscriptions
+            SET basic_quota = ?
+            WHERE plan_id = 'free'
+              AND basic_quota = 10
+            """,
+            (int(plan_by_id("free")["basic_quota"]),),
         )
 
     def ensure_user(self, username: str, password: str, connection=None) -> dict[str, Any]:

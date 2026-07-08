@@ -4,8 +4,8 @@ ScolioScan School uses three access levels:
 
 | Tier | Price | Monthly resources | Target user |
 | --- | --- | --- | --- |
-| Free | $0 | 10 Basic, 0 Advanced | quick individual checks |
-| Plus | $19/month | 80 Basic, 8 Advanced | families and regular personal monitoring |
+| Free | $0 | 5 Basic, 0 Advanced | quick individual checks |
+| Plus | $19/month | 80 Basic, 4 Advanced | families and regular personal monitoring |
 | Corporate | custom | negotiated with school | schools, districts, medical offices |
 
 Rationale:
