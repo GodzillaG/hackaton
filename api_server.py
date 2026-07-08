@@ -35,7 +35,14 @@ MAX_RESPONSE_IMAGE_SIDE = 1280
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
-analyzer = ScoliosisScreeningAnalyzer(static_image_mode=True)
+_analyzer: ScoliosisScreeningAnalyzer | None = None
+
+
+def get_analyzer() -> ScoliosisScreeningAnalyzer:
+    global _analyzer
+    if _analyzer is None:
+        _analyzer = ScoliosisScreeningAnalyzer(static_image_mode=True)
+    return _analyzer
 
 
 METRIC_DEFS = [
@@ -123,13 +130,14 @@ def handle_large_file(_: RequestEntityTooLarge):
 
 @app.route("/health", methods=["GET"])
 def health():
+    current_analyzer = get_analyzer()
     return jsonify(
         {
             "status": "ok",
             "service": "scoliosis-screening-api",
             "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
-            "analysis_engine": analyzer.engine,
-            "pose_model": str(getattr(analyzer, "task_model_path", "")),
+            "analysis_engine": current_analyzer.engine,
+            "pose_model": str(getattr(current_analyzer, "task_model_path", "")),
         }
     )
 
@@ -147,8 +155,9 @@ def analyze():
 
     frame = _resize_for_analysis(frame)
     student_id = _extract_student_id()
-    screening, mp_results = analyzer.analyze_frame(frame)
-    annotated = analyzer.draw_overlay(frame, mp_results, screening)
+    current_analyzer = get_analyzer()
+    screening, mp_results = current_analyzer.analyze_frame(frame)
+    annotated = current_analyzer.draw_overlay(frame, mp_results, screening)
     response = _build_response(student_id, screening, annotated)
     _persist_report(response, annotated)
 

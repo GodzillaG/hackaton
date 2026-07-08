@@ -31,6 +31,7 @@ uv --cache-dir /tmp/uv-cache sync
 npm install
 npm run api
 npm run dev
+npm test
 npm run build
 ```
 
@@ -38,10 +39,17 @@ Before committing, run:
 
 ```bash
 uv --cache-dir /tmp/uv-cache run --no-sync python -m py_compile api_server.py pose_analyzer.py
+npm test
 npm run build
 ```
 
 When checking the analyzer directly, use an image from `public/test_images/`.
+
+## Testing Policy
+
+- Add or update tests for new behavior, bug fixes, API response changes, metric logic, and upload/proxy changes.
+- Keep tests deterministic and avoid requiring a live Next.js or Flask server when a unit test can cover the behavior.
+- Prefer the standard Python `unittest` suite unless a new test framework is intentionally introduced.
 
 ## Local Network
 
