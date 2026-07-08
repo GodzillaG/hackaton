@@ -1,9 +1,10 @@
 .next/
 node_modules/
-reports/
-archive/
+.venv/
 __pycache__/
 *.py[cod]
-.venv/
+reports/
+archive/
+/test_images/
 .env
 .env.local

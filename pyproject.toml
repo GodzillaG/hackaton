@@ -1,0 +1,14 @@
+[project]
+name = "scoliosis-screening-complex"
+version = "1.0.0"
+description = "Mobile AI complex for school scoliosis risk screening"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "flask>=3.0.0",
+  "mediapipe>=0.10.14",
+  "numpy>=1.26.0",
+  "opencv-python>=4.9.0"
+]
+
+[tool.uv]
+package = false
