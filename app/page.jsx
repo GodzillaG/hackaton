@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { buildHumanReportText, reportTextFileName } from "./reportExport.mjs";
 
 const ANALYZE_ENDPOINT = "/api/analyze";
 const HEALTH_ENDPOINT = "/api/health";
@@ -722,15 +723,15 @@ export default function Home() {
     setResult(null);
   }
 
-  function downloadJson() {
+  function downloadReport() {
     if (!result) return;
-    const blob = new Blob([JSON.stringify(result, null, 2)], {
-      type: "application/json"
+    const blob = new Blob([buildHumanReportText(result)], {
+      type: "text/plain;charset=utf-8"
     });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${result.report_id || "screening-report"}.json`;
+    link.download = reportTextFileName(result);
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -1017,7 +1018,7 @@ export default function Home() {
         </form>
 
         <section className="panel resultPanel">
-          {result ? <ResultView result={result} onDownload={downloadJson} /> : <EmptyResult />}
+          {result ? <ResultView result={result} onDownload={downloadReport} /> : <EmptyResult />}
         </section>
       </section>
     </main>
@@ -1330,7 +1331,7 @@ function ResultView({ result, onDownload }) {
           <div className="sectionHeader">
             <h3>Кратко</h3>
             <button className="ghostButton" type="button" onClick={onDownload}>
-              Скачать
+              Скачать отчёт
             </button>
           </div>
           <ol className="recommendations">
