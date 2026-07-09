@@ -44,9 +44,10 @@ class ReportExportTests(unittest.TestCase):
         }
         script = textwrap.dedent(
             f"""
-            import {{ buildHumanReportText, reportTextFileName }} from './app/reportExport.mjs';
+            import {{ buildDownloadableReportText, buildHumanReportText, reportTextFileName }} from './app/reportExport.mjs';
             const result = {json.dumps(sample_result, ensure_ascii=False)};
             console.log('FILE=' + reportTextFileName(result));
+            console.log('BOM=' + (buildDownloadableReportText(result).charCodeAt(0) === 0xfeff));
             console.log(buildHumanReportText(result));
             """
         )
@@ -60,6 +61,7 @@ class ReportExportTests(unittest.TestCase):
         output = completed.stdout
 
         self.assertIn("FILE=DEMO-001_20260709_120000-analysis.txt", output)
+        self.assertIn("BOM=true", output)
         self.assertIn("Подробный отчёт скрининга осанки", output)
         self.assertIn("ИТОГ", output)
         self.assertIn("МЕТРИКИ", output)

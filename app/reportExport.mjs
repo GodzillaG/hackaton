@@ -157,6 +157,10 @@ export function buildHumanReportText(result) {
   return lines.join("\n");
 }
 
+export function buildDownloadableReportText(result) {
+  return `\ufeff${buildHumanReportText(result)}`;
+}
+
 export function reportTextFileName(result) {
   const reportId = cleanValue(result?.report_id, "screening-report");
   const safeId = reportId.replace(/[^A-Za-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "");

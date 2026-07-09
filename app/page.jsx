@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { buildHumanReportText, reportTextFileName } from "./reportExport.mjs";
+import { buildDownloadableReportText, reportTextFileName } from "./reportExport.mjs";
 
 const ANALYZE_ENDPOINT = "/api/analyze";
 const HEALTH_ENDPOINT = "/api/health";
@@ -725,7 +725,7 @@ export default function Home() {
 
   function downloadReport() {
     if (!result) return;
-    const blob = new Blob([buildHumanReportText(result)], {
+    const blob = new Blob([buildDownloadableReportText(result)], {
       type: "text/plain;charset=utf-8"
     });
     const url = URL.createObjectURL(blob);
